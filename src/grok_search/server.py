@@ -152,6 +152,11 @@ async def web_search(
     platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
     extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 0."] = 0,
+    from_date: Annotated[str, "YYYY-MM-DD format start date filter for search results."] = "",
+    to_date: Annotated[str, "YYYY-MM-DD format end date filter for search results."] = "",
+    allowed_domains: Annotated[str, "Comma-separated list of domains to restrict search to."] = "",
+    max_search_results: Annotated[int, "Maximum number of search results to use (0 = no limit, max 20)."] = 0,
+    reasoning_effort: Annotated[str, "Reasoning effort level (low/medium/high/xhigh)."] = "",
 ) -> dict:
     session_id = new_session_id()
     try:
@@ -169,7 +174,7 @@ async def web_search(
             return {"session_id": session_id, "content": f"无效模型: {model}", "sources_count": 0}
         effective_model = model
 
-    grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
+    grok_provider = GrokSearchProvider(api_url, api_key, effective_model, reasoning_effort=reasoning_effort)
 
     # 计算额外信源配额
     has_tavily = bool(config.tavily_api_key)
@@ -188,7 +193,14 @@ async def web_search(
     # 并行执行搜索任务
     async def _safe_grok() -> str:
         try:
-            return await grok_provider.search(random.choice(SEARCH_FRAMINGS).format(query=query), platform)
+            return await grok_provider.search(
+                random.choice(SEARCH_FRAMINGS).format(query=query),
+                platform=platform,
+                from_date=from_date,
+                to_date=to_date,
+                allowed_domains=allowed_domains,
+                max_search_results=max_search_results,
+            )
         except Exception as e:
             return _format_grok_error(e, api_key)
 

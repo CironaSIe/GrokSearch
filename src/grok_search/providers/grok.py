@@ -34,6 +34,31 @@ def get_local_time_info() -> str:
     )
 
 
+def _split_csv_values(value: str) -> list[str]:
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
+def _valid_reasoning_effort(effort: str) -> str:
+    normalized = (effort or "").strip().lower()
+    return normalized if normalized in {"low", "medium", "high", "xhigh"} else ""
+
+
+def _build_reasoning_prompt(effort: str) -> str:
+    effort = effort.strip().lower()
+    if effort == "low":
+        return "Be concise; minimal analysis."
+    elif effort == "high":
+        return "Think step by step; show your reasoning."
+    elif effort == "xhigh":
+        return "Very detailed reasoning; explore multiple angles."
+    return ""
+
+
+def _is_x_platform(platform: str) -> bool:
+    normalized = (platform or "").strip().lower()
+    return normalized in {"x", "twitter", "x/twitter", "twitter/x", "推特", "x平台"}
+
+
 def _needs_time_context(query: str) -> bool:
     """检查查询是否需要时间上下文"""
     # 中文时间相关关键词
@@ -118,38 +143,106 @@ class _WaitWithRetryAfter(wait_base):
 
 
 class GrokSearchProvider(BaseSearchProvider):
-    def __init__(self, api_url: str, api_key: str, model: str = "grok-4-fast"):
+    def __init__(self, api_url: str, api_key: str, model: str = "grok-4-fast", reasoning_effort: str = ""):
         super().__init__(api_url, api_key)
         self.model = model
+        self.reasoning_effort = _valid_reasoning_effort(reasoning_effort)
 
     def get_provider_name(self) -> str:
         return "Grok"
 
-    async def search(self, query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx=None) -> List[SearchResult]:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        platform_prompt = ""
-
-        if platform:
-            platform_prompt = "\n\nYou should search the web for the information you need, and focus on these platform: " + platform + "\n"
-
-        time_context = get_local_time_info() + "\n"
-
-        payload = {
+    def _build_search_payload(
+        self,
+        query: str,
+        platform: str = "",
+        from_date: str = "",
+        to_date: str = "",
+        allowed_domains: str = "",
+        max_search_results: int = 0,
+        reasoning_effort: str = "",
+    ) -> dict:
+        prompt_lines: list[str] = []
+        payload: dict = {
             "model": self.model,
             "messages": [
                 {
                     "role": "system",
                     "content": search_prompt,
                 },
-                {"role": "user", "content": time_context + query + platform_prompt},
             ],
             "stream": True,
         }
 
-        await log_info(ctx, f"platform_prompt: { query + platform_prompt}", config.debug_enabled)
+        if platform:
+            if _is_x_platform(platform):
+                payload["tools"] = [{"type": "x_search"}]
+                prompt_lines.append("Search both web and X/Twitter for this query.")
+            else:
+                prompt_lines.append(f"Focus the search on this platform or source type: {platform}.")
+
+        if config.web_search_tool_enabled:
+            payload.setdefault("tools", []).insert(0, {"type": "web_search"})
+
+        search_parameters: dict = {}
+        if from_date:
+            search_parameters["from_date"] = from_date
+            prompt_lines.append(f"Only use results dated on or after {from_date}.")
+        if to_date:
+            search_parameters["to_date"] = to_date
+            prompt_lines.append(f"Only use results dated on or before {to_date}.")
+        if search_parameters:
+            search_parameters["mode"] = "on"
+            payload["search_parameters"] = search_parameters
+
+        domains = _split_csv_values(allowed_domains)
+        if domains:
+            prompt_lines.append(
+                "Only search and cite these domains: " + ", ".join(domains) + "."
+            )
+
+        if max_search_results > 0:
+            prompt_lines.append(
+                f"Use no more than {max_search_results} high-quality search results or citations in the final answer."
+            )
+
+        effort = _valid_reasoning_effort(reasoning_effort) or self.reasoning_effort
+        rp = _build_reasoning_prompt(effort)
+        if rp:
+            payload["messages"][0]["content"] += "\n\n" + rp
+
+        time_context = get_local_time_info() + "\n"
+        controls = ("\n\n[Search Controls]\n" + "\n".join(f"- {line}" for line in prompt_lines)) if prompt_lines else ""
+        payload["messages"].append({"role": "user", "content": time_context + query + controls})
+        return payload
+
+    async def search(
+        self,
+        query: str,
+        platform: str = "",
+        min_results: int = 3,
+        max_results: int = 10,
+        ctx=None,
+        from_date: str = "",
+        to_date: str = "",
+        allowed_domains: str = "",
+        max_search_results: int = 0,
+        reasoning_effort: str = "",
+    ) -> List[SearchResult]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = self._build_search_payload(
+            query=query,
+            platform=platform,
+            from_date=from_date,
+            to_date=to_date,
+            allowed_domains=allowed_domains,
+            max_search_results=max_search_results,
+            reasoning_effort=reasoning_effort,
+        )
+
+        await log_info(ctx, f"search payload model={self.model} tools={payload.get('tools')}", config.debug_enabled)
 
         return await self._execute_stream_with_retry(headers, payload, ctx)
 
@@ -224,7 +317,7 @@ class GrokSearchProvider(BaseSearchProvider):
         """执行带重试机制的流式 HTTP 请求"""
         timeout = httpx.Timeout(connect=6.0, read=120.0, write=10.0, pool=None)
 
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=config.ssl_verify_enabled) as client:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(config.retry_max_attempts + 1),
                 wait=_WaitWithRetryAfter(config.retry_multiplier, config.retry_max_wait),
@@ -250,7 +343,7 @@ class GrokSearchProvider(BaseSearchProvider):
         body = dict(payload)
         body["stream"] = False
         timeout = httpx.Timeout(connect=6.0, read=120.0, write=10.0, pool=None)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=config.ssl_verify_enabled) as client:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(config.retry_max_attempts + 1),
                 wait=_WaitWithRetryAfter(config.retry_multiplier, config.retry_max_wait),

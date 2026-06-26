@@ -96,6 +96,14 @@ class Config:
         return os.getenv("TAVILY_API_KEY")
 
     @property
+    def ssl_verify_enabled(self) -> bool:
+        return os.getenv("GROK_SSL_VERIFY", "true").lower() not in ("false", "0", "no")
+
+    @property
+    def web_search_tool_enabled(self) -> bool:
+        return os.getenv("GROK_WEB_SEARCH_TOOL", "true").lower() in ("true", "1", "yes")
+
+    @property
     def firecrawl_api_url(self) -> str:
         return os.getenv("FIRECRAWL_API_URL", "https://api.firecrawl.dev/v2")
 
@@ -184,6 +192,8 @@ class Config:
             "GROK_API_KEY": api_key_masked,
             "GROK_MODEL": self.grok_model,
             "GROK_DEBUG": self.debug_enabled,
+            "GROK_SSL_VERIFY": self.ssl_verify_enabled,
+            "GROK_WEB_SEARCH_TOOL": self.web_search_tool_enabled,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),
             "TAVILY_API_URL": self.tavily_api_url,
