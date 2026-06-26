@@ -173,8 +173,9 @@ class GrokSearchProvider(BaseSearchProvider):
 
     async def _parse_streaming_response(self, response, ctx=None) -> str:
         content = ""
-        full_body_buffer = [] 
-        
+        full_body_buffer = []
+        parse_errors = 0
+
         async for line in response.aiter_lines():
             line = line.strip()
             if not line:
@@ -196,6 +197,7 @@ class GrokSearchProvider(BaseSearchProvider):
                         if "content" in delta:
                             content += delta["content"]
                 except (json.JSONDecodeError, IndexError):
+                    parse_errors += 1
                     continue
                 
         if not content and full_body_buffer:
@@ -206,8 +208,16 @@ class GrokSearchProvider(BaseSearchProvider):
                     message = data["choices"][0].get("message", {})
                     content = message.get("content", "")
             except json.JSONDecodeError:
-                pass
-        
+                parse_errors += 1
+
+        if not content:
+            if full_body_buffer:
+                raise ValueError(
+                    "Grok stream parse error: no content found"
+                    f" (parse_errors={parse_errors})"
+                )
+            raise ValueError("Grok stream parse error: empty streaming response")
+
         await log_info(ctx, f"content: {content}", config.debug_enabled)
 
         return content

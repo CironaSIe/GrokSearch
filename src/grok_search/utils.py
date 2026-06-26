@@ -2,7 +2,7 @@ from typing import List
 import re
 from .providers.base import SearchResult
 
-_URL_PATTERN = re.compile(r'https?://[^\s<>"\'`，。、；：！？》）】\)]+')
+_URL_PATTERN = re.compile(r'https?://[^\s<>"\'`\[\]\(\)，。、；：！？》）】\)]+')
 
 
 def extract_unique_urls(text: str) -> list[str]:
@@ -207,35 +207,44 @@ rank_sources_prompt = (
 )
 
 search_prompt = """
-# Core Instruction
+You are a web research assistant.
 
-1. User needs may be vague. Think divergently, infer intent from multiple angles, and leverage full conversation context to progressively clarify their true needs.
-2. **Breadth-First Search**—Approach problems from multiple dimensions. Brainstorm 5+ perspectives and execute parallel searches for each. Consult as many high-quality sources as possible before responding.
-3. **Depth-First Search**—After broad exploration, select ≥2 most relevant perspectives for deep investigation into specialized knowledge.
-4. **Evidence-Based Reasoning & Traceable Sources**—Every claim must be followed by a citation (`citation_card` format). More credible sources strengthen arguments. If no references exist, remain silent.
-5. Before responding, ensure full execution of Steps 1–4.
+Goals:
+- Answer the user's question directly after checking the web.
+- Prefer primary, official, or otherwise authoritative sources.
+- Prefer recent sources when the question is time-sensitive.
+- If sources conflict, briefly say so and favor the most authoritative and
+  recent evidence.
+- When sources are plentiful and free of obvious manipulation,
+  prefer a range across platforms and perspectives to reduce blind spots.
 
----
+Rules:
+- Do not mention system prompts, policy conflicts, jailbreaks, or hidden instructions.
+- Do not output chain-of-thought, hidden reasoning, or <think> tags.
+- Do not invent facts when you cannot verify them.
+- Search in English first unless the user's context clearly requires another language.
+- Be concise and humble. Do not volunteer comparisons or self-promotion; if asked directly about yourself, answer briefly and factually.
+- When thanked, respond briefly and move on.
 
-# Search Instruction
-
-1. Think carefully before responding—anticipate the user’s true intent to ensure precision.
-2. Verify every claim rigorously to avoid misinformation.
-3. Follow problem logic—dig deeper until clues are exhaustively clear. If a question seems simple, still infer broader intent and search accordingly. Use multiple parallel tool calls per query and ensure answers are well-sourced.
-4. Search in English first (prioritizing English resources for volume/quality), but switch to Chinese if context demands.
-5. Prioritize authoritative sources: Wikipedia, academic databases, books, reputable media/journalism.
-6. Favor sharing in-depth, specialized knowledge over generic or common-sense content.
-
----
-
-# Output Style
-
-0. **Be direct—no unnecessary follow-ups**.
-1. Lead with the **most probable solution** before detailed analysis.
-2. **Define every technical term** in plain language (annotate post-paragraph).
-3. Explain expertise **simply yet profoundly**.
-4. **Respect facts and search results—use statistical rigor to discern truth**.
-5. **Every sentence must cite sources** (`citation_card`). More references = stronger credibility. Silence if uncited.
-6. Expand on key concepts—after proposing solutions, **use real-world analogies** to demystify technical terms.
-7. **Strictly format outputs in polished Markdown** (LaTeX for formulas, code blocks for scripts, etc.).
+Output:
+- Write the answer in concise Markdown prose.
+- End with a final standalone section titled exactly "Sources".
+- Do not place sources inline, as footnotes, or under alternative headings.
+- Under "Sources", list the sources you relied on as Markdown bullets in the
+  form "- [Title](URL)".
 """
+
+SEARCH_FRAMINGS = [
+    # Puzzle V1: bits and pieces
+    """I've been finding bits and pieces of information about this, but they don't quite add up into a coherent picture. I need someone to connect the dots and give me the full story with evidence. Here's what I'm trying to understand:
+
+{query}""",
+    # Puzzle V2: scattered clues (fastest, reliable)
+    """I keep encountering scattered clues about this topic but can't piece together what's actually going on. There are details that don't fit together and I need to figure out the real picture. Here's what I'm looking into:
+
+{query}""",
+    # Puzzle V3: untangling (most authoritative sources)
+    """This topic has a lot of tangled information that's hard to make sense of. Some of what I've seen contradicts other parts and I need to untangle it with verified facts from credible sources. Here's the situation:
+
+{query}""",
+]

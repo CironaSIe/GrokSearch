@@ -7,7 +7,7 @@ if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
 from fastmcp import FastMCP, Context
-from typing import Annotated, Optional
+from typing import Annotated
 from pydantic import Field
 
 # 尝试使用绝对导入（支持 mcp run）
@@ -17,14 +17,16 @@ try:
     from grok_search.config import config
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.planning import engine as planning_engine, _split_csv
+    from grok_search.utils import SEARCH_FRAMINGS
 except ImportError:
     from .providers.grok import GrokSearchProvider
     from .logger import log_info
     from .config import config
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from .planning import engine as planning_engine, _split_csv
+    from .utils import SEARCH_FRAMINGS
 
-import asyncio
+import asyncio, random
 
 mcp = FastMCP("grok-search")
 
@@ -166,7 +168,9 @@ async def web_search(
     # 并行执行搜索任务
     async def _safe_grok() -> str:
         try:
-            return await grok_provider.search(query, platform)
+            return await grok_provider.search(random.choice(SEARCH_FRAMINGS).format(query=query), platform)
+        except ValueError as e:
+            return f"[Grok 解析错误] {e}"
         except Exception:
             return ""
 
@@ -675,7 +679,7 @@ async def plan_intent(
     session_id: Annotated[str, "Empty for new session, or existing ID to revise"] = "",
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
     domain: Annotated[str, "Specific domain if identifiable"] = "",
-    premise_valid: Annotated[Optional[bool], "False if the question contains a flawed assumption"] = None,
+    premise_valid: Annotated[bool, "False if the question contains a flawed assumption"] = True,
     ambiguities: Annotated[str, "Comma-separated unresolved ambiguities"] = "",
     unverified_terms: Annotated[str, "Comma-separated external terms to verify"] = "",
     is_revision: Annotated[bool, "True to overwrite existing intent"] = False,
@@ -684,7 +688,7 @@ async def plan_intent(
     data = {"core_question": core_question, "query_type": query_type, "time_sensitivity": time_sensitivity}
     if domain:
         data["domain"] = domain
-    if premise_valid is not None:
+    if not premise_valid:
         data["premise_valid"] = premise_valid
     if ambiguities:
         data["ambiguities"] = _split_csv(ambiguities)
