@@ -97,7 +97,7 @@ async def get_session_sources(session_id: str) -> dict:
 
 async def run_fetch(url: str) -> str:
     import httpx
-    from .utils import fetch_prompt
+    from .prompts import fetch_prompt
 
     try:
         api_url = config.grok_api_url

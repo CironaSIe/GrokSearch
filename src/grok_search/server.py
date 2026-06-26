@@ -267,9 +267,9 @@ async def web_search(
     if firecrawl_count > 0:
         coros.append(_safe_firecrawl())
 
-    gathered = await asyncio.gather(*coros)
+    gathered = await asyncio.gather(*coros, return_exceptions=True)
 
-    grok_result: str = gathered[0] or ""
+    grok_result: str = gathered[0] if isinstance(gathered[0], str) else ""
     tavily_results: list[dict] | None = None
     firecrawl_results: list[dict] | None = None
     idx = 1
@@ -317,13 +317,44 @@ async def get_sources(
     }
 
 
+_HIKARI_MCP_PATH = "/mcp"
+_HIKARI_TAVILY_API_PATH = "/api/tavily"
+
+
+def _normalize_tavily_api_base_url(api_url: str) -> str:
+    trimmed = api_url.rstrip("/")
+    if trimmed.endswith(_HIKARI_MCP_PATH):
+        prefix = trimmed[: -len(_HIKARI_MCP_PATH)]
+        return f"{prefix}{_HIKARI_TAVILY_API_PATH}"
+    return trimmed
+
+
+def _build_tavily_map_body(
+    url: str, instructions: str | None = None,
+    max_depth: int = 1, max_breadth: int = 20,
+    limit: int = 50, timeout: int = 150,
+) -> dict:
+    from urllib.parse import urlparse
+    body: dict = {
+        "url": url, "max_depth": max_depth,
+        "max_breadth": max_breadth, "limit": limit, "timeout": timeout,
+    }
+    if instructions:
+        body["instructions"] = instructions
+    host = urlparse(url).hostname
+    if host:
+        body["allow_external"] = False
+        body["select_domains"] = [host]
+    return body
+
+
 async def _call_tavily_extract(url: str) -> str | None:
     import httpx
     api_url = config.tavily_api_url
     api_key = config.tavily_api_key
     if not api_key:
         return None
-    endpoint = f"{api_url.rstrip('/')}/extract"
+    endpoint = f"{_normalize_tavily_api_base_url(api_url)}/extract"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = {"urls": [url], "format": "markdown"}
     try:
@@ -344,7 +375,7 @@ async def _call_tavily_search(query: str, max_results: int = 6) -> list[dict] | 
     api_key = config.tavily_api_key
     if not api_key:
         return None
-    endpoint = f"{config.tavily_api_url.rstrip('/')}/search"
+    endpoint = f"{_normalize_tavily_api_base_url(config.tavily_api_url)}/search"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = {
         "query": query,
@@ -469,11 +500,9 @@ async def _call_tavily_map(url: str, instructions: str = None, max_depth: int = 
     api_key = config.tavily_api_key
     if not api_key:
         return "配置错误: TAVILY_API_KEY 未配置，请设置环境变量 TAVILY_API_KEY"
-    endpoint = f"{api_url.rstrip('/')}/map"
+    endpoint = f"{_normalize_tavily_api_base_url(api_url)}/map"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body = {"url": url, "max_depth": max_depth, "max_breadth": max_breadth, "limit": limit, "timeout": timeout}
-    if instructions:
-        body["instructions"] = instructions
+    body = _build_tavily_map_body(url, instructions, max_depth, max_breadth, limit, timeout)
     try:
         async with httpx.AsyncClient(timeout=float(timeout + 10)) as client:
             response = await client.post(endpoint, headers=headers, json=body)
@@ -487,7 +516,24 @@ async def _call_tavily_map(url: str, instructions: str = None, max_depth: int = 
     except httpx.TimeoutException:
         return f"映射超时: 请求超过{timeout}秒"
     except httpx.HTTPStatusError as e:
-        return f"HTTP错误: {e.response.status_code} - {e.response.text[:200]}"
+        if e.response.status_code == 400 and "allow_external" not in (e.response.text or ""):
+            raise
+        # allow_external/select_domains 不被 Tavily 版本支持，回退到无此参数
+        legacy_body = {k: v for k, v in body.items() if k not in ("allow_external", "select_domains")}
+        try:
+            async with httpx.AsyncClient(timeout=float(timeout + 10)) as client:
+                resp = await client.post(endpoint, headers=headers, json=legacy_body)
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps({
+                    "base_url": data.get("base_url", ""),
+                    "results": data.get("results", []),
+                    "response_time": data.get("response_time", 0)
+                }, ensure_ascii=False, indent=2)
+        except httpx.TimeoutException:
+            return f"映射超时: 请求超过{timeout}秒"
+        except Exception as e2:
+            return f"映射错误: {e2}"
     except Exception as e:
         return f"映射错误: {str(e)}"
 

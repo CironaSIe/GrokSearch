@@ -7,7 +7,8 @@ from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait
 from tenacity.wait import wait_base
 from zoneinfo import ZoneInfo
 from .base import BaseSearchProvider, SearchResult
-from ..utils import search_prompt, fetch_prompt, url_describe_prompt, rank_sources_prompt, redact_sensitive_text
+from ..prompts import search_prompt, fetch_prompt, url_describe_prompt, rank_sources_prompt
+from ..utils import redact_sensitive_text
 from ..logger import log_info
 from ..config import config
 
