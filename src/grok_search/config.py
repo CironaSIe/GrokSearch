@@ -104,6 +104,14 @@ class Config:
         return os.getenv("GROK_WEB_SEARCH_TOOL", "true").lower() in ("true", "1", "yes")
 
     @property
+    def exa_api_key(self) -> str | None:
+        return os.getenv("EXA_API_KEY")
+
+    @property
+    def exa_base_url(self) -> str:
+        return os.getenv("EXA_BASE_URL", "https://api.exa.ai")
+
+    @property
     def firecrawl_api_url(self) -> str:
         return os.getenv("FIRECRAWL_API_URL", "https://api.firecrawl.dev/v2")
 
@@ -201,6 +209,8 @@ class Config:
             "TAVILY_API_KEY": self._mask_api_key(self.tavily_api_key) if self.tavily_api_key else "未配置",
             "FIRECRAWL_API_URL": self.firecrawl_api_url,
             "FIRECRAWL_API_KEY": self._mask_api_key(self.firecrawl_api_key) if self.firecrawl_api_key else "未配置",
+            "EXA_API_KEY": self._mask_api_key(self.exa_api_key) if self.exa_api_key else "未配置",
+            "EXA_BASE_URL": self.exa_base_url,
             "config_status": config_status
         }
 

@@ -13,6 +13,7 @@ from pydantic import Field
 # 尝试使用绝对导入（支持 mcp run）
 try:
     from grok_search.providers.grok import GrokSearchProvider
+    from grok_search.providers.exa import ExaSearchProvider
     from grok_search.logger import log_info
     from grok_search.config import config
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
@@ -20,6 +21,7 @@ try:
     from grok_search.utils import SEARCH_FRAMINGS, redact_sensitive_text
 except ImportError:
     from .providers.grok import GrokSearchProvider
+    from .providers.exa import ExaSearchProvider
     from .logger import log_info
     from .config import config
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
@@ -29,6 +31,37 @@ except ImportError:
 import asyncio, random, httpx
 
 mcp = FastMCP("grok-search")
+
+
+def _register_exa_if_configured(mcp: FastMCP):
+    if not config.exa_api_key:
+        return
+    exa_provider = ExaSearchProvider(config.exa_api_key, config.exa_base_url)
+
+    @mcp.tool(name="exa_search")
+    async def exa_search(
+        query: Annotated[str, "Search query for Exa API."],
+        max_results: Annotated[int, "Number of results to return."] = 5,
+    ) -> str:
+        results = await exa_provider.search(query, max_results)
+        return "\n\n".join(
+            f"## {r.title}\nURL: {r.url}\n{r.snippet}"
+            for r in results
+        )
+
+    @mcp.tool(name="exa_find_similar")
+    async def exa_find_similar(
+        url: Annotated[str, "URL to find similar pages for."],
+        max_results: Annotated[int, "Number of results to return."] = 5,
+    ) -> str:
+        results = await exa_provider.find_similar(url, max_results)
+        return "\n\n".join(
+            f"## {r.title}\nURL: {r.url}\n{r.snippet}"
+            for r in results
+        )
+
+
+_register_exa_if_configured(mcp)
 
 _SOURCES_CACHE = SourcesCache(max_size=256)
 _AVAILABLE_MODELS_CACHE: dict[tuple[str, str], list[str]] = {}
@@ -131,6 +164,16 @@ def _format_grok_error(exc: Exception, api_key: str = "") -> str:
 
     msg = redact_sensitive_text(str(exc), api_key).strip()
     return f"Grok 调用失败: {exc.__class__.__name__}" + (f": {msg}" if msg else "")
+
+
+def _format_sources_markdown(sources: list[dict]) -> str:
+    lines = []
+    for item in sources:
+        url = item.get("url", "")
+        title = item.get("title") or url
+        title = title.replace("[", r"\[").replace("]", r"\]").replace("\n", " ")
+        lines.append(f"- [{title}]({url})")
+    return "\n".join(lines)
 
 
 @mcp.tool(
@@ -250,8 +293,9 @@ async def web_search(
     When you feel confused or curious about the search response content, use the session_id returned by web_search to invoke the this tool to obtain the corresponding list of information sources.
     Retrieve all cached sources for a previous web_search call.
     Provide the session_id returned by web_search to get the full source list.
+    Returns both sources (list[dict]) and sources_markdown (str in "- [Title](URL)" format).
     """,
-    meta={"version": "1.0.0", "author": "guda.studio"},
+    meta={"version": "2.0.0", "author": "guda.studio"},
 )
 async def get_sources(
     session_id: Annotated[str, "Session ID from previous web_search call."]
@@ -261,10 +305,16 @@ async def get_sources(
         return {
             "session_id": session_id,
             "sources": [],
+            "sources_markdown": "",
             "sources_count": 0,
             "error": "session_id_not_found_or_expired",
         }
-    return {"session_id": session_id, "sources": sources, "sources_count": len(sources)}
+    return {
+        "session_id": session_id,
+        "sources": sources,
+        "sources_markdown": _format_sources_markdown(sources),
+        "sources_count": len(sources),
+    }
 
 
 async def _call_tavily_extract(url: str) -> str | None:
