@@ -212,11 +212,9 @@ class GrokSearchProvider(BaseSearchProvider):
 
         if not content:
             if full_body_buffer:
-                raise ValueError(
-                    "Grok stream parse error: no content found"
-                    f" (parse_errors={parse_errors})"
-                )
-            raise ValueError("Grok stream parse error: empty streaming response")
+                await log_info(ctx, f"stream parse returned no content (parse_errors={parse_errors})", config.debug_enabled)
+            else:
+                await log_info(ctx, "stream parse returned empty streaming response", config.debug_enabled)
 
         await log_info(ctx, f"content: {content}", config.debug_enabled)
 
@@ -241,7 +239,47 @@ class GrokSearchProvider(BaseSearchProvider):
                         json=payload,
                     ) as response:
                         response.raise_for_status()
-                        return await self._parse_streaming_response(response, ctx)
+                        content = await self._parse_streaming_response(response, ctx)
+                        if content.strip():
+                            return content
+
+        await log_info(ctx, "streaming returned empty content, fallback to non-stream request", config.debug_enabled)
+        return await self._execute_non_stream_with_retry(headers, payload, ctx)
+
+    async def _execute_non_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
+        body = dict(payload)
+        body["stream"] = False
+        timeout = httpx.Timeout(connect=6.0, read=120.0, write=10.0, pool=None)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(config.retry_max_attempts + 1),
+                wait=_WaitWithRetryAfter(config.retry_multiplier, config.retry_max_wait),
+                retry=retry_if_exception(_is_retryable_exception),
+                reraise=True,
+            ):
+                with attempt:
+                    response = await client.post(
+                        f"{self.api_url}/chat/completions",
+                        headers=headers, json=body,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    return self._extract_content_from_completion(data)
+
+    @staticmethod
+    def _extract_content_from_completion(data: dict) -> str:
+        choices = data.get("choices", [])
+        if not choices:
+            return ""
+        message = choices[0].get("message", {})
+        content = message.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = [item["text"] for item in content
+                     if isinstance(item, dict) and item.get("type") == "text"]
+            return "".join(parts)
+        return ""
 
     async def describe_url(self, url: str, ctx=None) -> dict:
         """让 Grok 阅读单个 URL 并返回 title + extracts"""

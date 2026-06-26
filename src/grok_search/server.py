@@ -17,16 +17,16 @@ try:
     from grok_search.config import config
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.planning import engine as planning_engine, _split_csv
-    from grok_search.utils import SEARCH_FRAMINGS
+    from grok_search.utils import SEARCH_FRAMINGS, redact_sensitive_text
 except ImportError:
     from .providers.grok import GrokSearchProvider
     from .logger import log_info
     from .config import config
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from .planning import engine as planning_engine, _split_csv
-    from .utils import SEARCH_FRAMINGS
+    from .utils import SEARCH_FRAMINGS, redact_sensitive_text
 
-import asyncio, random
+import asyncio, random, httpx
 
 mcp = FastMCP("grok-search")
 
@@ -113,6 +113,26 @@ def _extra_results_to_sources(
     return sources
 
 
+def _format_grok_error(exc: Exception, api_key: str = "") -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        reason = httpx.codes(status).name or ""
+        body = redact_sensitive_text(exc.response.text or "", api_key).strip()
+        detail = f": {body}" if body else ""
+        return f"Grok 调用失败: HTTP {status} ({reason}){detail}"
+
+    if isinstance(exc, httpx.RequestError):
+        msg = redact_sensitive_text(str(exc), api_key).strip()
+        cls_name = exc.__class__.__name__
+        return f"Grok 调用失败: 网络错误 ({cls_name})" + (f": {msg}" if msg else "")
+
+    if isinstance(exc, ValueError):
+        return f"Grok 调用失败: {exc}"
+
+    msg = redact_sensitive_text(str(exc), api_key).strip()
+    return f"Grok 调用失败: {exc.__class__.__name__}" + (f": {msg}" if msg else "")
+
+
 @mcp.tool(
     name="web_search",
     output_schema=None,
@@ -169,10 +189,8 @@ async def web_search(
     async def _safe_grok() -> str:
         try:
             return await grok_provider.search(random.choice(SEARCH_FRAMINGS).format(query=query), platform)
-        except ValueError as e:
-            return f"[Grok 解析错误] {e}"
-        except Exception:
-            return ""
+        except Exception as e:
+            return _format_grok_error(e, api_key)
 
     async def _safe_tavily() -> list[dict] | None:
         try:
