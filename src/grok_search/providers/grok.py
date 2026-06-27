@@ -144,13 +144,36 @@ class _WaitWithRetryAfter(wait_base):
 
 
 class GrokSearchProvider(BaseSearchProvider):
-    def __init__(self, api_url: str, api_key: str, model: str = "grok-4-fast", reasoning_effort: str = ""):
+    def __init__(self, api_url: str, api_key: str, model: str = "grok-4-fast", reasoning_effort: str = "", timeout: int | None = None):
         super().__init__(api_url, api_key)
         self.model = model
         self.reasoning_effort = _valid_reasoning_effort(reasoning_effort)
+        self.timeout = timeout
 
     def get_provider_name(self) -> str:
         return "Grok"
+
+    @property
+    def _use_responses_api(self) -> bool:
+        return config.force_responses_api or "multi-agent" in self.model.lower()
+
+    @property
+    def _api_endpoint(self) -> str:
+        return "responses" if self._use_responses_api else "chat/completions"
+
+    def _build_chat_payload(self, system: str, user: str, *, stream: bool = True, tools: list | None = None) -> dict:
+        payload: dict = {"model": self.model, "stream": stream}
+        if tools:
+            payload["tools"] = tools
+        if self._use_responses_api:
+            payload["input"] = user
+            payload["instructions"] = system
+        else:
+            payload["messages"] = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+        return payload
 
     def _build_search_payload(
         self,
@@ -161,28 +184,27 @@ class GrokSearchProvider(BaseSearchProvider):
         allowed_domains: str = "",
         max_search_results: int = 0,
         reasoning_effort: str = "",
+        direction: str = "",
     ) -> dict:
         prompt_lines: list[str] = []
         payload: dict = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": search_prompt,
-                },
-            ],
             "stream": True,
         }
 
+        tools: list[dict] = []
         if platform:
             if _is_x_platform(platform):
-                payload["tools"] = [{"type": "x_search"}]
+                tools.append({"type": "x_search"})
                 prompt_lines.append("Search both web and X/Twitter for this query.")
             else:
                 prompt_lines.append(f"Focus the search on this platform or source type: {platform}.")
 
         if config.web_search_tool_enabled:
-            payload.setdefault("tools", []).insert(0, {"type": "web_search"})
+            tools.insert(0, {"type": "web_search"})
+
+        if tools:
+            payload["tools"] = tools
 
         search_parameters: dict = {}
         if from_date:
@@ -208,12 +230,40 @@ class GrokSearchProvider(BaseSearchProvider):
 
         effort = _valid_reasoning_effort(reasoning_effort) or self.reasoning_effort
         rp = _build_reasoning_prompt(effort)
-        if rp:
-            payload["messages"][0]["content"] += "\n\n" + rp
+
+        dir_prompt = ""
+        if direction:
+            dir_lower = direction.lower().strip()
+            dir_map = {
+                "mainstream": "Prioritize official, institutional, and widely-cited authoritative sources belonging to the mainstream or establishment narrative.",
+                "diverse": "Actively seek a range of perspectives and ideological leanings on this topic — from establishment to fringe, across the spectrum.",
+                "critical": "This topic has competing narratives. Actively seek perspectives that challenge or critique the mainstream or official view.",
+                "eyewitness": "Prioritize first-hand accounts, personal diaries, primary source documents — records produced by direct participants or observers at the time of the events.",
+                "adversarial": "Prioritize sources from the losing side, critics of the dominant narrative, or parties whose interests oppose the mainstream account.",
+                "external": "Prioritize records from neutral third-party observers with no direct stake in the outcome (e.g., foreign reporters, independent monitors, non-aligned witnesses).",
+                "comprehensive": "Actively collect sources across ALL positions: official, eyewitness, adversarial, external, and academic. Present the range of perspectives.",
+            }
+            dir_prompt = f"\n\n[Source Direction] {dir_map[dir_lower]}" if dir_lower in dir_map else f"\n\n[Source Direction] {direction}"
 
         time_context = get_local_time_info() + "\n"
         controls = ("\n\n[Search Controls]\n" + "\n".join(f"- {line}" for line in prompt_lines)) if prompt_lines else ""
-        payload["messages"].append({"role": "user", "content": time_context + query + controls})
+
+        system_content = search_prompt
+        if rp:
+            system_content += "\n\n" + rp
+        if dir_prompt:
+            system_content += dir_prompt
+        user_content = time_context + query + controls
+
+        if self._use_responses_api:
+            payload["instructions"] = system_content
+            payload["input"] = user_content
+        else:
+            payload["messages"] = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content},
+            ]
+
         return payload
 
     async def search(
@@ -228,6 +278,7 @@ class GrokSearchProvider(BaseSearchProvider):
         allowed_domains: str = "",
         max_search_results: int = 0,
         reasoning_effort: str = "",
+        direction: str = "",
     ) -> List[SearchResult]:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -241,6 +292,7 @@ class GrokSearchProvider(BaseSearchProvider):
             allowed_domains=allowed_domains,
             max_search_results=max_search_results,
             reasoning_effort=reasoning_effort,
+            direction=direction,
         )
 
         await log_info(ctx, f"search_payload: {redact_sensitive_text(json.dumps(payload, ensure_ascii=False), self.api_key)}", config.debug_enabled)
@@ -252,17 +304,10 @@ class GrokSearchProvider(BaseSearchProvider):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": fetch_prompt,
-                },
-                {"role": "user", "content": url + "\n获取该网页内容并返回其结构化Markdown格式" },
-            ],
-            "stream": True,
-        }
+        payload = self._build_chat_payload(
+            system=fetch_prompt,
+            user=url + "\n获取该网页内容并返回其结构化Markdown格式",
+        )
         return await self._execute_stream_with_retry(headers, payload, ctx)
 
     async def _parse_streaming_response(self, response, ctx=None) -> str:
@@ -314,9 +359,64 @@ class GrokSearchProvider(BaseSearchProvider):
 
         return content
 
+    async def _parse_responses_stream(self, response, ctx=None) -> str:
+        content = ""
+        full_body_buffer = []
+
+        async for line in response.aiter_lines():
+            line = line.strip()
+            if not line:
+                continue
+
+            full_body_buffer.append(line)
+
+            if line.startswith("data:"):
+                if line in ("data: [DONE]", "data:[DONE]"):
+                    continue
+                try:
+                    json_str = line[5:].lstrip()
+                    data = json.loads(json_str)
+                    t = data.get("type", "")
+                    if t == "response.output_text.delta":
+                        content += data.get("delta", "")
+                except json.JSONDecodeError:
+                    continue
+
+        if not content and full_body_buffer:
+            try:
+                full_text = "".join(full_body_buffer)
+                data = json.loads(full_text)
+                content = self._extract_content_from_responses(data)
+            except json.JSONDecodeError:
+                pass
+
+        if not content:
+            if full_body_buffer:
+                await log_info(ctx, "responses stream parse returned no content", config.debug_enabled)
+            else:
+                await log_info(ctx, "responses stream parse returned empty streaming response", config.debug_enabled)
+
+        await log_info(ctx, f"responses content: {content}", config.debug_enabled)
+
+        return content
+
+    @staticmethod
+    def _extract_content_from_responses(data: dict) -> str:
+        output = data.get("output", [])
+        texts: list[str] = []
+        for item in output:
+            if item.get("type") == "message":
+                for cb in item.get("content", []):
+                    if cb.get("type") == "output_text":
+                        texts.append(cb.get("text", ""))
+        return "".join(texts)
+
     async def _execute_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
         """执行带重试机制的流式 HTTP 请求"""
-        timeout = httpx.Timeout(connect=6.0, read=120.0, write=10.0, pool=None)
+        read_timeout = self.timeout or config.search_timeout_seconds
+        timeout = httpx.Timeout(connect=6.0, read=read_timeout, write=10.0, pool=None)
+        endpoint_url = f"{self.api_url}/{self._api_endpoint}"
+        parse_fn = self._parse_responses_stream if self._use_responses_api else self._parse_streaming_response
 
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=config.ssl_verify_enabled) as client:
             async for attempt in AsyncRetrying(
@@ -328,14 +428,14 @@ class GrokSearchProvider(BaseSearchProvider):
                 with attempt:
                     async with client.stream(
                         "POST",
-                        f"{self.api_url}/chat/completions",
+                        endpoint_url,
                         headers=headers,
                         json=payload,
                     ) as response:
                         if response.is_error:
                             await response.aread()
                         response.raise_for_status()
-                        content = await self._parse_streaming_response(response, ctx)
+                        content = await parse_fn(response, ctx)
                         if content.strip():
                             return content
 
@@ -345,7 +445,10 @@ class GrokSearchProvider(BaseSearchProvider):
     async def _execute_non_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
         body = dict(payload)
         body["stream"] = False
-        timeout = httpx.Timeout(connect=6.0, read=120.0, write=10.0, pool=None)
+        read_timeout = self.timeout or config.search_timeout_seconds
+        timeout = httpx.Timeout(connect=6.0, read=read_timeout, write=10.0, pool=None)
+        endpoint_url = f"{self.api_url}/{self._api_endpoint}"
+
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=config.ssl_verify_enabled) as client:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(config.retry_max_attempts + 1),
@@ -355,11 +458,13 @@ class GrokSearchProvider(BaseSearchProvider):
             ):
                 with attempt:
                     response = await client.post(
-                        f"{self.api_url}/chat/completions",
+                        endpoint_url,
                         headers=headers, json=body,
                     )
                     response.raise_for_status()
                     data = response.json()
+                    if self._use_responses_api:
+                        return self._extract_content_from_responses(data)
                     return self._extract_content_from_completion(data)
 
     @staticmethod
@@ -383,14 +488,10 @@ class GrokSearchProvider(BaseSearchProvider):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": url_describe_prompt},
-                {"role": "user", "content": url},
-            ],
-            "stream": True,
-        }
+        payload = self._build_chat_payload(
+            system=url_describe_prompt,
+            user=url,
+        )
         result = await self._execute_stream_with_retry(headers, payload, ctx)
         title, extracts = url, ""
         for line in result.strip().splitlines():
@@ -406,14 +507,10 @@ class GrokSearchProvider(BaseSearchProvider):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": rank_sources_prompt},
-                {"role": "user", "content": f"Query: {query}\n\n{sources_text}"},
-            ],
-            "stream": True,
-        }
+        payload = self._build_chat_payload(
+            system=rank_sources_prompt,
+            user=f"Query: {query}\n\n{sources_text}",
+        )
         result = await self._execute_stream_with_retry(headers, payload, ctx)
         order: list[int] = []
         seen: set[int] = set()

@@ -138,6 +138,7 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_RETRY_MAX_ATTEMPTS` | ❌ | `3` | 最大重试次数 |
 | `GROK_RETRY_MULTIPLIER` | ❌ | `1` | 重试退避乘数 |
 | `GROK_RETRY_MAX_WAIT` | ❌ | `10` | 重试最大等待秒数 |
+| `GROK_MIN_TIMEOUT` | ❌ | `30` | 所有超时的最小值下限（防止设过短导致请求失败） |
 
 
 ### 验证安装
@@ -263,10 +264,10 @@ A: 在 Claude 对话中说"显示 grok-search 配置信息"，将自动测试 AP
 
 ## 致谢
 
-本项目整合了社区 fork 中的以下贡献（已核实代码实际存在）：
+本项目整合了以下社区 fork 的贡献（已验证 fork 分支上的独立提交）：
 
-- [Techd81](https://github.com/Techd81) — 错误信息脱敏、reasoning_effort 支持、from_date/to_date 搜索参数、URL 正则改进
-- [QianFuv](https://github.com/QianFuv) — search_prompt 简化优化
+- [Techd81](https://github.com/Techd81) — 搜索参数增强（from_date/to_date、reasoning_effort）、错误信息脱敏、URL 正则改进、streaming HTTP 错误处理、multi-agent Responses API 适配
+- [QianFuv](https://github.com/QianFuv) — 运行时模块拆分重构、search_prompt 简化优化、Tavily Hikari URL 兼容
 - [konbakuyomu](https://github.com/konbakuyomu) — Exa 搜索提供者、SSL_VERIFY 配置支持
 - [Flutter233PM](https://github.com/Flutter233PM) — 流式空内容自动降级非流式请求
 - [Huan-zhaojun](https://github.com/Huan-zhaojun) — get_sources Markdown 输出格式
@@ -278,13 +279,12 @@ A: 在 Claude 对话中说"显示 grok-search 配置信息"，将自动测试 AP
 - [shengnan-Luo](https://github.com/shengnan-Luo) — FIRECRAWL_API_URL 配置支持
 - [handsomelong922](https://github.com/handsomelong922) — SEARCH_TIMEOUT 超时配置
 
-### 未整合的 Fork 特性分析
+### 已评估但未整合的 Fork 特性
 
-以下为社区 fork 中存在但本分支未整合的特性，附分析结论：
+以下为社区 fork 中存在但本分支尚未整合的特性：
 
-- **Responses API 双模路由**（多 `fork` 涉及）—— xAI 推荐的新 API，支持 stateful 对话和 server-side 工具（web_search/x_search 自动执行）。**已实现（本次会话）**：模型名含 `multi-agent` 时自动切换；`GROK_FORCE_RESPONSES_API=true` 可强制启用
-- **HTTP/SSE 传输 + Docker 部署**（多个 fork 涉及）—— MCP Streamable HTTP 标准（2025年3月），适合云端部署。**未整合**：stdio 对本项目核心用户已够用，云端搜索 MCP 与云服务自带搜索重叠，收益有限
-- **Tavily API Key 轮换**（个别 fork 涉及）—— 多 key 自动故障转移。**未整合**：适用于 Tavily 免费版 1000 次/月超限场景，但多数用户单 key 足够；需改 3 处 `_call_tavily_*` + config，复杂度与收益不匹配
+- **HTTP/SSE 传输 + Docker 部署** — [handsomelong922](https://github.com/handsomelong922/GrokSearch/commit/969760558c695c80f80f7213782ead79805fb971) 实现 Dockerfile + docker-compose.yml + `MCP_TRANSPORT` 环境变量支持（http/streamable-http/sse/stdio）
+- **Tavily API Key 轮换** — [handsomelong922](https://github.com/handsomelong922/GrokSearch/commit/87b8581d43a9863b73a80e67fe3ff69e16baa379) 实现逗号分隔多 key + round-robin 轮换 + 错误自动故障转移
 
 ## 许可证
 

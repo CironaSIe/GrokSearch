@@ -117,8 +117,9 @@ async def run_fetch(url: str) -> str:
         ],
         "stream": True,
     }
+    fetch_timeout = config.fetch_timeout_seconds
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=float(fetch_timeout)) as client:
             async with client.stream("POST", f"{api_url.rstrip('/')}/chat/completions", headers=headers, json=payload) as response:
                 response.raise_for_status()
                 content = ""
