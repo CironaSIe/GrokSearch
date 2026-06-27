@@ -262,37 +262,14 @@ A: 在 Claude 对话中说"显示 grok-search 配置信息"，将自动测试 AP
 
 ## 致谢
 
-本项目基于社区 fork 的集智优化，感谢以下贡献者（按功能领域排列）：
+本项目整合了社区 fork 中的以下实际代码贡献，感谢：
 
-**Provider 增强**
-- [Techd81](https://github.com/Techd81) — Responses API 双模路由、multi-agent 模型自动识别、搜索参数扩展、错误脱敏与格式化
-- [wu452148993](https://github.com/wu452148993) — GROK_WEB_SEARCH_TOOL 开关、Responses API 集成
-- [konbakuyomu](https://github.com/konbakuyomu) — SSL_VERIFY 支持、Exa 搜索提供者、测试框架设计
-- [zc-libre](https://github.com/zc-libre) — X/Twitter 搜索工具概念
-
-**Bug 修复**
-- [Flutter233PM](https://github.com/Flutter233PM) — 流式空 content 自动降级非流式
-- [MoonWeSif](https://github.com/MoonWeSif) — Optional[bool] JSON Schema 兼容性修复
-- [ynlea](https://github.com/ynlea) — search_prompt 净化（防 jailbreak 检测误杀）
-
-**功能增强**
-- [QianFuv](https://github.com/QianFuv) — 分层架构设计、search_prompt 优化、搜索服务编排
+- [Techd81](https://github.com/Techd81) — 错误信息脱敏、reasoning_effort 支持、URL 正则改进
+- [QianFuv](https://github.com/QianFuv) — search_prompt 简化
+- [konbakuyomu](https://github.com/konbakuyomu) — Exa 搜索提供者
 - [Huan-zhaojun](https://github.com/Huan-zhaojun) — get_sources Markdown 输出格式
-- [jayhchen](https://github.com/jayhchen) — switch_model 始终注册、Docker 日志
-- [Maomaoxion](https://github.com/Maomaoxion) — 默认模型更新
 - [shengnan-Luo](https://github.com/shengnan-Luo) — FIRECRAWL_API_URL 配置支持
-- [CamelliaV](https://github.com/CamelliaV) — 并行查询概念
-- [sweeticetea](https://github.com/sweeticetea) — 兼容性优化
-
-**部署与工具链**
-- [starlight02](https://github.com/starlight02) — HTTP 传输 + Docker 化、fastmcp 升级参考
-- [denniszlei](https://github.com/denniszlei) — Docker + GHCR 发布、CI 工作流
-- [JARVIS-no1](https://github.com/JARVIS-no1) — Docker + Railway 部署、多客户端文档
-- [wwwisme](https://github.com/wwwisme) — CLI 封装概念
-- [handsomelong922](https://github.com/handsomelong922) — Tavily API Key 轮换、超时配置
-
-**生态**
-- [ripples-alive](https://github.com/ripples-alive) — OpenClaw 插件 / skill 系统
+- [MoonWeSif](https://github.com/MoonWeSif) — premise_valid JSON Schema 兼容修复
 
 ## 许可证
 
