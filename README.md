@@ -262,14 +262,20 @@ A: 在 Claude 对话中说"显示 grok-search 配置信息"，将自动测试 AP
 
 ## 致谢
 
-本项目整合了社区 fork 中的以下实际代码贡献，感谢：
+本项目整合了社区 fork 中的以下贡献（已核实代码实际存在）：
 
-- [Techd81](https://github.com/Techd81) — 错误信息脱敏、reasoning_effort 支持、URL 正则改进
-- [QianFuv](https://github.com/QianFuv) — search_prompt 简化
-- [konbakuyomu](https://github.com/konbakuyomu) — Exa 搜索提供者
+- [Techd81](https://github.com/Techd81) — 错误信息脱敏、reasoning_effort 支持、from_date/to_date 搜索参数、URL 正则改进
+- [QianFuv](https://github.com/QianFuv) — search_prompt 简化优化
+- [konbakuyomu](https://github.com/konbakuyomu) — Exa 搜索提供者、SSL_VERIFY 配置支持
+- [Flutter233PM](https://github.com/Flutter233PM) — 流式空内容自动降级非流式请求
 - [Huan-zhaojun](https://github.com/Huan-zhaojun) — get_sources Markdown 输出格式
-- [shengnan-Luo](https://github.com/shengnan-Luo) — FIRECRAWL_API_URL 配置支持
 - [MoonWeSif](https://github.com/MoonWeSif) — premise_valid JSON Schema 兼容修复
+- [ynlea](https://github.com/ynlea) — search_prompt 净化（防 jailbreak 检测误杀）
+- [Maomaoxion](https://github.com/Maomaoxion) — 默认模型更新为 grok-4.20-fast
+- [wu452148993](https://github.com/wu452148993) — web_search_tool 开关配置
+- [jayhchen](https://github.com/jayhchen) — switch_model 工具始终注册
+- [shengnan-Luo](https://github.com/shengnan-Luo) — FIRECRAWL_API_URL 配置支持
+- [handsomelong922](https://github.com/handsomelong922) — SEARCH_TIMEOUT 超时配置
 
 ## 许可证
 
