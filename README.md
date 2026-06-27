@@ -125,7 +125,8 @@ claude mcp add-json grok-search --scope user '{
 |------|------|--------|------|
 | `GROK_API_URL` | ✅ | - | Grok API 地址（OpenAI 兼容格式） |
 | `GROK_API_KEY` | ✅ | - | Grok API 密钥 |
-| `GROK_MODEL` | ❌ | `grok-4-fast` | 默认模型（设置后优先于 `~/.config/grok-search/config.json`） |
+| `GROK_MODEL` | ❌ | `grok-4.20-fast` | 默认模型（设置后优先于 `~/.config/grok-search/config.json`） |
+| `GROK_FORCE_RESPONSES_API` | ❌ | `false` | 强制使用 Responses API（multi-agent 模型自动启用） |
 | `TAVILY_API_KEY` | ❌ | - | Tavily API 密钥（用于 web_fetch / web_map） |
 | `TAVILY_API_URL` | ❌ | `https://api.tavily.com` | Tavily API 地址 |
 | `TAVILY_ENABLED` | ❌ | `true` | 是否启用 Tavily |
@@ -276,6 +277,14 @@ A: 在 Claude 对话中说"显示 grok-search 配置信息"，将自动测试 AP
 - [jayhchen](https://github.com/jayhchen) — switch_model 工具始终注册
 - [shengnan-Luo](https://github.com/shengnan-Luo) — FIRECRAWL_API_URL 配置支持
 - [handsomelong922](https://github.com/handsomelong922) — SEARCH_TIMEOUT 超时配置
+
+### 未整合的 Fork 特性分析
+
+以下为社区 fork 中存在但本分支未整合的特性，附分析结论：
+
+- **Responses API 双模路由**（多 `fork` 涉及）—— xAI 推荐的新 API，支持 stateful 对话和 server-side 工具（web_search/x_search 自动执行）。**已实现（本次会话）**：模型名含 `multi-agent` 时自动切换；`GROK_FORCE_RESPONSES_API=true` 可强制启用
+- **HTTP/SSE 传输 + Docker 部署**（多个 fork 涉及）—— MCP Streamable HTTP 标准（2025年3月），适合云端部署。**未整合**：stdio 对本项目核心用户已够用，云端搜索 MCP 与云服务自带搜索重叠，收益有限
+- **Tavily API Key 轮换**（个别 fork 涉及）—— 多 key 自动故障转移。**未整合**：适用于 Tavily 免费版 1000 次/月超限场景，但多数用户单 key 足够；需改 3 处 `_call_tavily_*` + config，复杂度与收益不匹配
 
 ## 许可证
 
