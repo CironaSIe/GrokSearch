@@ -116,16 +116,12 @@ class Config:
         return os.getenv("EXA_BASE_URL", "https://api.exa.ai")
 
     @property
-    def min_timeout_seconds(self) -> int:
-        return int(os.getenv("GROK_MIN_TIMEOUT", "30"))
-
-    @property
     def search_timeout_seconds(self) -> int:
-        return max(int(os.getenv("SEARCH_TIMEOUT", "120")), self.min_timeout_seconds)
+        return int(os.getenv("SEARCH_TIMEOUT", "120"))
 
     @property
     def fetch_timeout_seconds(self) -> int:
-        return max(int(os.getenv("FETCH_TIMEOUT", "90")), self.min_timeout_seconds)
+        return int(os.getenv("FETCH_TIMEOUT", "90"))
 
     @property
     def grok_fetch_fallback_enabled(self) -> bool:
@@ -223,7 +219,6 @@ class Config:
             "GROK_SSL_VERIFY": self.ssl_verify_enabled,
             "GROK_WEB_SEARCH_TOOL": self.web_search_tool_enabled,
             "GROK_FORCE_RESPONSES_API": self.force_responses_api,
-            "GROK_MIN_TIMEOUT": self.min_timeout_seconds,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),
             "SEARCH_TIMEOUT": self.search_timeout_seconds,

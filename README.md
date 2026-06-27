@@ -138,7 +138,6 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_RETRY_MAX_ATTEMPTS` | ❌ | `3` | 最大重试次数 |
 | `GROK_RETRY_MULTIPLIER` | ❌ | `1` | 重试退避乘数 |
 | `GROK_RETRY_MAX_WAIT` | ❌ | `10` | 重试最大等待秒数 |
-| `GROK_MIN_TIMEOUT` | ❌ | `30` | 所有超时的最小值下限（防止设过短导致请求失败） |
 
 
 ### 验证安装
