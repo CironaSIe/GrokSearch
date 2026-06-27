@@ -78,8 +78,8 @@ PHASE_NAMES = [
 
 REQUIRED_PHASES: dict[int, set[str]] = {
     1: {"intent_analysis", "complexity_assessment", "query_decomposition"},
-    2: {"intent_analysis", "complexity_assessment", "query_decomposition", "search_strategy", "tool_selection"},
-    3: set(PHASE_NAMES),
+    2: {"intent_analysis", "complexity_assessment", "query_decomposition", "search_strategy"},
+    3: {"intent_analysis", "complexity_assessment", "query_decomposition", "search_strategy", "execution_order"},
 }
 
 _ACCUMULATIVE_LIST_PHASES = {"query_decomposition", "tool_selection"}
@@ -116,7 +116,16 @@ class PlanningSession:
         return self.required_phases().issubset(self.phases.keys())
 
     def build_executable_plan(self) -> dict:
-        return {name: record.data for name, record in self.phases.items()}
+        plan = {name: record.data for name, record in self.phases.items()}
+        # Auto-fill tool_selection: default unmapped sub-queries to web_search
+        if "tool_selection" not in plan and "query_decomposition" in plan:
+            sq_data = plan["query_decomposition"]
+            if isinstance(sq_data, list):
+                plan["tool_selection"] = [
+                    {"sub_query_id": item["id"], "tool": "web_search", "reason": "default"}
+                    for item in sq_data
+                ]
+        return plan
 
 
 class PlanningEngine:
@@ -209,3 +218,136 @@ class PlanningEngine:
 
 
 engine = PlanningEngine()
+
+
+# ── Decontamination Pipeline ────────────────────────────────────────────
+
+DECON_PHASE_NAMES = [
+    "decon_assess",
+    "decon_verify",
+    "decon_provenance",
+    "decon_motive",
+    "decon_synthesis",
+    "decon_patterns",
+]
+
+DECON_ORDER: dict[str, int] = {name: i for i, name in enumerate(DECON_PHASE_NAMES)}
+
+
+class DeconSession:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.phases: dict[str, PhaseRecord] = {}
+        self.contamination_level: str | None = None
+        self.contamination_dimensions: list[str] = []
+        self.decon_complete: bool = False
+
+    @property
+    def completed_phases(self) -> list[str]:
+        return [p for p in DECON_PHASE_NAMES if p in self.phases]
+
+    def phases_remaining(self) -> list[str]:
+        done = set(self.phases.keys())
+        if "decon_assess" not in done:
+            return []
+        last_done = max((DECON_ORDER[p] for p in done if p in DECON_ORDER), default=-1)
+        return [p for p in DECON_PHASE_NAMES if DECON_ORDER[p] > last_done]
+
+    def build_summary(self) -> dict:
+        summary = {
+            "decon_complete": self.decon_complete,
+            "contamination_level": self.contamination_level,
+            "contamination_dimensions": self.contamination_dimensions,
+        }
+        corrections = []
+        for name in self.completed_phases:
+            rec = self.phases[name]
+            if isinstance(rec.data, dict):
+                data = rec.data
+                if "corrected_search_directions" in data and data["corrected_search_directions"]:
+                    summary["corrected_search_directions"] = data["corrected_search_directions"]
+                if "source_reliability" in data and data["source_reliability"]:
+                    summary["source_reliability"] = data["source_reliability"]
+                if "contamination_summary" in data and data["contamination_summary"]:
+                    summary["contamination_summary"] = data["contamination_summary"]
+        return summary
+
+
+class DecontaminationEngine:
+    def __init__(self):
+        self._sessions: dict[str, DeconSession] = {}
+
+    def get_session(self, session_id: str) -> DeconSession | None:
+        return self._sessions.get(session_id)
+
+    def process_phase(
+        self,
+        phase: str,
+        thought: str,
+        session_id: str,
+        phase_data: dict | None = None,
+        confidence: float = 1.0,
+        is_revision: bool = False,
+    ) -> dict:
+        if phase not in DECON_PHASE_NAMES:
+            return {"error": f"Unknown decon phase: {phase}. Valid: {', '.join(DECON_PHASE_NAMES)}"}
+
+        if session_id in self._sessions:
+            session = self._sessions[session_id]
+        else:
+            session = DeconSession(session_id)
+            self._sessions[session_id] = session
+
+        if is_revision or phase not in session.phases:
+            session.phases[phase] = PhaseRecord(
+                phase=phase, thought=thought, data=phase_data or {}, confidence=confidence,
+            )
+        else:
+            existing = session.phases[phase]
+            if isinstance(existing.data, dict) and isinstance(phase_data, dict):
+                existing.data.update(phase_data)
+            else:
+                session.phases[phase] = PhaseRecord(
+                    phase=phase, thought=thought, data=phase_data or {}, confidence=confidence,
+                )
+            existing.thought = thought
+            existing.confidence = confidence
+
+        if phase == "decon_assess" and phase_data:
+            session.contamination_level = phase_data.get("contamination_level")
+            session.contamination_dimensions = phase_data.get("contamination_dimensions", [])
+            if session.contamination_level in (None, "low"):
+                session.decon_complete = True
+                # low suspicion: auto-mark remaining decon phases as skipped
+                for p in DECON_PHASE_NAMES:
+                    if p not in session.phases and p != "decon_assess":
+                        session.phases[p] = PhaseRecord(
+                            phase=p, thought="skipped: contamination level low",
+                            data={"skipped": True, "reason": "low contamination suspicion"},
+                        )
+                session.decon_complete = True
+
+        if phase == "decon_synthesis":
+            session.decon_complete = True
+
+        last_done = max((DECON_ORDER[p] for p in session.phases if p in DECON_ORDER), default=-1)
+        result: dict = {
+            "session_id": session.session_id,
+            "decon_complete": session.decon_complete,
+            "completed_phases": session.completed_phases,
+            "contamination_level": session.contamination_level,
+            "contamination_dimensions": session.contamination_dimensions,
+        }
+
+        remaining = session.phases_remaining()
+        if remaining:
+            result["phases_remaining"] = remaining
+
+        if session.decon_complete:
+            result["decon_summary"] = session.build_summary()
+
+        result["can_exit"] = last_done >= 0
+        return result
+
+
+decon_engine = DecontaminationEngine()
