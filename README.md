@@ -15,21 +15,32 @@
 
 ## 一、概述
 
-Grok Search MCP 是一个基于 [FastMCP](https://github.com/jlowin/fastmcp) 构建的 MCP 服务器，采用**双引擎架构**：**Grok** 负责 AI 驱动的智能搜索，**Tavily** 负责高保真网页抓取与站点映射，各取所长为 Claude Code / Cherry Studio 等LLM Client提供完整的实时网络访问能力。
+Grok Search MCP 是一个基于 [FastMCP](https://github.com/jlowin/fastmcp) 构建的 MCP 服务器，采用**多引擎架构**：**Grok** 负责 AI 驱动的智能搜索，**Tavily** 负责高保真网页抓取与站点映射，**Firecrawl** 托底抓取，**Python 原生抓取** (trafilatura) 作为零成本后备，各取所长为 Claude Code / Cherry Studio 等 LLM Client 提供完整的实时网络访问能力。
 
 ```
 Claude ──MCP──► Grok Search Server
                   ├─ web_search  ───► Grok API（AI 搜索）
-                  ├─ web_fetch   ───► Tavily Extract → Firecrawl Scrape（内容抓取，自动降级）
-                  └─ web_map     ───► Tavily Map（站点映射）
+                  ├─ web_fetch   ───► Python → Tavily → Firecrawl → Grok（自动降级）
+                  ├─ web_map     ───► Tavily Map（站点映射）
+                  ├─ get_sources ───► 检索缓存的搜索信源
+                  ├─ plan_*      ───► 结构化搜索规划管线
+                  ├─ decon_*     ───► 信息去污管线
+                  └─ get_config_info  → 配置诊断
 ```
 
 ### 功能特性
 
-- **双引擎**：Grok 搜索 + Tavily 抓取/映射，互补协作
-- **Firecrawl 托底**：Tavily 提取失败时自动降级到 Firecrawl Scrape，支持空内容自动重试
-- **OpenAI 兼容接口**，支持任意 Grok 镜像站
-- **自动时间注入**（检测时间相关查询，注入本地时间上下文）
+- **响应式搜索规划** — 结构化多阶段搜索规划管线（意图捕获 → 复杂度评估 → 子查询分解 → 搜索词策略 → 工具选择 → 执行排序），自动处理污染检测旁路
+- **信息去污管线** — 以盖革计数器方式检测信息污染（信源集中、激励不对称、定义漂移、数字异常、信源洗白），自动触发并与搜索规划联动
+- **原生抓取 + 多级降级** — `web_fetch` 优先走 Python trafilatura 原生抓取（零成本），失败时自动降级到 Firecrawl → Tavily → Grok
+- **提供者选择** — `web_fetch` 支持 `provider` 参数（`auto`/`python`/`tavily`/`firecrawl`/`grok`），LLM 可按需指定
+- **reasoning_effort API 参数** — Responses API 路径发送标准的 `reasoning: {"effort": ...}`，Chat Completions 路径发送 `reasoning_effort` 参数 + 推理提示兜底
+- **信源缓存** — `web_search` 结果按 `session_id` 缓存，`get_sources` 随时拉取
+- **OpenAI 兼容接口** — 支持任意 Grok 镜像站，自动探测 Responses API / Chat Completions API
+- **自动时间注入** — 检测时间相关查询，注入本地时间上下文
+- **双端带外信源** — `web_search` 支持 Tavily/Firecrawl 作为额外信源补充
+- **Exa 搜索提供者** — 可选的 Exa 搜索作为 Grok 搜索的补充
+- **搜索方向控制** — `web_search` 支持 `direction` 参数（主流/多元/批判/目击者/对抗性/外部/全面）
 - 一键禁用 Claude Code 官方 WebSearch/WebFetch，强制路由到本工具
 - 智能重试（支持 Retry-After 头解析 + 指数退避）
 - 父进程监控（Windows 下自动检测父进程退出，防止僵尸进程）
@@ -39,7 +50,7 @@ Claude ──MCP──► Grok Search Server
 ![](./images/wogrok.png)
 如上图，**为公平实验，我们打开了claude模型内置的搜索工具**，然而opus 4.6仍然相信自己的内部常识，不查询FastAPI的官方文档，以获取最新示例。
 ![](./images/wgrok.png)
-如上图，当打开`grok-search MCP`时，在相同的实验条件下，opus 4.6主动调用多次搜索，以**获取官方文档，回答更可靠。** 
+如上图，当打开`grok-search MCP`时，在相同的实验条件下，opus 4.6主动调用多次搜索，以**获取官方文档，回答更可靠。**
 
 
 ## 二、安装
@@ -66,13 +77,34 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 </details>
 
 ### 一键安装
-若之前安装过本项目，使用以下命令卸载旧版MCP。
+
+若之前安装过本项目，使用以下命令卸载旧版 MCP：
 ```
 claude mcp remove grok-search
 ```
 
+#### GuDa 用户（推荐）
 
-将以下命令中的环境变量替换为你自己的值后执行。Grok 接口需为 OpenAI 兼容格式；Tavily 为可选配置，未配置时工具 `web_fetch` 和 `web_map` 不可用。
+GuDa 用户只需设置 `GUDA_API_KEY` 即可访问所有服务——API URL 和 Key 自动推导：
+
+```bash
+claude mcp add-json grok-search --scope user '{
+  "type": "stdio",
+  "command": "uvx",
+  "args": [
+    "--from",
+    "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
+    "grok-search"
+  ],
+  "env": {
+    "GUDA_API_KEY": "your-guda-api-key"
+  }
+}'
+```
+
+#### 自定义配置
+
+自行指定各 API 端点：
 
 ```bash
 claude mcp add-json grok-search --scope user '{
@@ -117,27 +149,40 @@ claude mcp add-json grok-search --scope user '{
     "TAVILY_API_URL": "https://api.tavily.com"
   }
 }'
-</details> ```
+</details>
 
-除此之外，你还可以在`env`字段中配置更多环境变量
+除此之外，你可以在 `env` 字段中配置更多环境变量：
 
 | 变量 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
-| `GROK_API_URL` | ✅ | - | Grok API 地址（OpenAI 兼容格式） |
-| `GROK_API_KEY` | ✅ | - | Grok API 密钥 |
+| `GUDA_API_KEY` | ❌ | - | GuDa API Key（设置后自动推导所有服务 URL 和 Key） |
+| `GUDA_BASE_URL` | ❌ | `https://code.guda.studio` | GuDa 服务基地址 |
+| `GROK_API_URL` | ❌ | `{GUDA_BASE_URL}/grok/v1` | Grok API 地址（OpenAI 兼容格式），覆盖 GuDa 推导值 |
+| `GROK_API_KEY` | ❌ | `{GUDA_API_KEY}` | Grok API 密钥，覆盖 GuDa 推导值 |
 | `GROK_MODEL` | ❌ | `grok-4.20-fast` | 默认模型（设置后优先于 `~/.config/grok-search/config.json`） |
 | `GROK_FORCE_RESPONSES_API` | ❌ | `false` | 强制使用 Responses API（multi-agent 模型自动启用） |
-| `TAVILY_API_KEY` | ❌ | - | Tavily API 密钥（用于 web_fetch / web_map） |
-| `TAVILY_API_URL` | ❌ | `https://api.tavily.com` | Tavily API 地址 |
+| `TAVILY_API_KEY` | ❌ | `{GUDA_API_KEY}` | Tavily API 密钥（用于 web_fetch / web_map） |
+| `TAVILY_API_URL` | ❌ | `{GUDA_BASE_URL}/tavily` | Tavily API 地址 |
 | `TAVILY_ENABLED` | ❌ | `true` | 是否启用 Tavily |
-| `FIRECRAWL_API_KEY` | ❌ | - | Firecrawl API 密钥（Tavily 失败时托底） |
-| `FIRECRAWL_API_URL` | ❌ | `https://api.firecrawl.dev/v2` | Firecrawl API 地址 |
+| `FIRECRAWL_API_KEY` | ❌ | `{GUDA_API_KEY}` | Firecrawl API 密钥（Tavily 失败时托底） |
+| `FIRECRAWL_API_URL` | ❌ | `{GUDA_BASE_URL}/firecrawl` | Firecrawl API 地址 |
+| `FIRECRAWL_ENABLED` | ❌ | `true` | 是否启用 Firecrawl |
+| `EXA_API_KEY` | ❌ | - | Exa API 密钥 |
+| `SSL_VERIFY` | ❌ | `true` | 是否验证 SSL 证书 |
+| `WEB_SEARCH_TOOL_ENABLED` | ❌ | `true` | 是否注册 web_search 工具 |
 | `GROK_DEBUG` | ❌ | `false` | 调试模式 |
 | `GROK_LOG_LEVEL` | ❌ | `INFO` | 日志级别 |
 | `GROK_LOG_DIR` | ❌ | `logs` | 日志目录 |
+| `GROK_FETCH_FALLBACK_ENABLED` | ❌ | `true` | 是否允许 Grok 作为 web_fetch 的最后兜底 |
 | `GROK_RETRY_MAX_ATTEMPTS` | ❌ | `3` | 最大重试次数 |
 | `GROK_RETRY_MULTIPLIER` | ❌ | `1` | 重试退避乘数 |
 | `GROK_RETRY_MAX_WAIT` | ❌ | `10` | 重试最大等待秒数 |
+| `MCP_TRANSPORT` | ❌ | `stdio` | MCP 传输协议（stdio/http/sse/streamable-http） |
+| `DECON_THOUGHT_BUDGET` | ❌ | `2000` | 去污管线每阶段 clues 最大字符数 |
+| `SPECIALIST_HTTP_PROXY` | ❌ | - | Specialist 抓取的 HTTP 代理（独立于系统代理） |
+| `SPECIALIST_HTTPS_PROXY` | ❌ | - | Specialist 抓取的 HTTPS 代理 |
+
+> **说明**：设置 `GUDA_API_KEY` 后，`GROK_API_URL`/`GROK_API_KEY`/`TAVILY_*`/`FIRECRAWL_*` 等变量均变为可选（自动推导），显式设置的变量优先级更高。
 
 
 ### 验证安装
@@ -146,59 +191,62 @@ claude mcp add-json grok-search --scope user '{
 claude mcp list
 ```
 
-🍟 显示连接成功后，我们**十分推荐**在 Claude 对话中输入 
+🍟 显示连接成功后，我们**十分推荐**在 Claude 对话中输入
 ```
 调用 grok-search toggle_builtin_tools，关闭Claude Code's built-in WebSearch and WebFetch tools
 ```
-工具将自动修改**项目级** `.claude/settings.json` 的 `permissions.deny`，一键禁用 Claude Code 官方的 WebSearch 和 WebFetch，从而迫使claude code调用本项目实现搜索！
+工具将自动修改**项目级** `.claude/settings.json` 的 `permissions.deny`，一键禁用 Claude Code 官方的 WebSearch 和 WebFetch，从而迫使 claude code 调用本项目实现搜索！
 
 
 
 ## 三、MCP 工具介绍
 
 <details>
-<summary>本项目提供多个 MCP 工具（展开查看）</summary>
+<summary>本项目提供 21 个 MCP 工具（展开查看）</summary>
 
 ### `web_search` — AI 网络搜索
 
-通过 Grok API 执行 AI 驱动的网络搜索，默认仅返回 Grok 的回答正文，并返回 `session_id` 以便后续获取信源。
-
-`web_search` 输出不展开信源，仅返回 `sources_count`；信源会按 `session_id` 缓存在服务端，可用 `get_sources` 拉取。
+通过 Grok API 执行 AI 驱动的网络搜索，默认仅返回回答正文 + `session_id`；信源按 `session_id` 缓存在服务端，可用 `get_sources` 拉取。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `query` | string | ✅ | - | 搜索查询语句 |
 | `platform` | string | ❌ | `""` | 聚焦平台（如 `"Twitter"`, `"GitHub, Reddit"`） |
 | `model` | string | ❌ | `null` | 按次指定 Grok 模型 ID |
-| `extra_sources` | int | ❌ | `0` | 额外补充信源数量（Tavily/Firecrawl，可为 0 关闭） |
+| `extra_sources` | int | ❌ | `0` | 额外补充信源数量（Tavily/Firecrawl，0 关闭） |
+| `from_date` | string | ❌ | `""` | 起始日期过滤（YYYY-MM-DD） |
+| `to_date` | string | ❌ | `""` | 结束日期过滤（YYYY-MM-DD） |
+| `allowed_domains` | string | ❌ | `""` | 限制搜索域名列表（逗号分隔） |
+| `max_search_results` | int | ❌ | `0` | 最大搜索结果数（0=无限，≤20） |
+| `reasoning_effort` | string | ❌ | `""` | 推理力度（low/medium/high/xhigh）。通常搜索不需要设高，仅在需要深度多步分析时使用 |
+| `direction` | string | ❌ | `""` | 信源方向：mainstream / diverse / critical / eyewitness / adversarial / external / comprehensive |
+| `timeout` | int | ❌ | `0` | 超时秒数（0=使用默认） |
 
 自动检测查询中的时间相关关键词（如"最新""今天""recent"等），注入本地时间上下文以提升时效性搜索的准确度。
 
-返回值（结构化字典）：
-- `session_id`: 本次查询的会话 ID
-- `content`: Grok 回答正文（已自动剥离信源）
-- `sources_count`: 已缓存的信源数量
+返回值：`session_id`, `content`, `sources_count`
 
 ### `get_sources` — 获取信源
 
-通过 `session_id` 获取对应 `web_search` 的全部信源。
+通过 `session_id` 获取对应 `web_search` 的全部信源。信源可能因缓存过期而不可用。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `session_id` | string | ✅ | `web_search` 返回的 `session_id` |
 
-返回值（结构化字典）：
-- `session_id`
-- `sources_count`
-- `sources`: 信源列表（每项包含 `url`，可能包含 `title`/`description`/`provider`）
+返回值：`session_id`, `sources_count`, `sources`（每项含 url/title/description/provider）
 
 ### `web_fetch` — 网页内容抓取
 
-通过 Tavily Extract API 获取完整网页内容，返回 Markdown 格式。Tavily 失败时自动降级到 Firecrawl Scrape 进行托底抓取。
+多级降级抓取，返回 Markdown 格式。fallback 链：`Python 原生 (trafilatura) → Firecrawl Scrape → Tavily Extract → Grok`。
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `url` | string | ✅ | 目标网页 URL |
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `url` | string | ✅ | - | 目标网页 URL |
+| `provider` | string | ❌ | `auto` | 抓取提供者：auto / python / tavily / firecrawl / grok |
+| `timeout` | int | ❌ | `0` | 超时秒数（0=使用默认） |
+
+Python 原生抓取需要安装 trafilatura（`pip install trafilatura`），未安装时自动跳过。
 
 ### `web_map` — 站点结构映射
 
@@ -215,7 +263,7 @@ claude mcp list
 
 ### `get_config_info` — 配置诊断
 
-无需参数。显示所有配置状态、测试 Grok API 连接、返回响应时间和可用模型列表（API Key 自动脱敏）。
+无需参数。显示所有配置状态、测试 Grok/Tavily/Firecrawl 连接、返回可用模型列表、传输协议、认证模式（API Key 自动脱敏）。
 
 ### `switch_model` — 模型切换
 
@@ -229,13 +277,26 @@ claude mcp list
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| `action` | string | ❌ | `"status"` | `"on"` 禁用官方工具 / `"off"` 启用官方工具 / `"status"` 查看状态 |
+| `action` | string | ❌ | `"status"` | `"on"` 禁用官方工具 / `"off"` 启用 / `"status"` 查看 |
 
 修改项目级 `.claude/settings.json` 的 `permissions.deny`，一键禁用 Claude Code 官方的 WebSearch 和 WebFetch。
 
-### `search_planning` — 搜索规划
+### `exa_search` / `exa_find_similar` — Exa 搜索
 
-结构化搜索规划脚手架（分阶段、多轮），用于在执行复杂搜索前先生成可执行的搜索计划。
+可选的 Exa 搜索提供者，需配置 `EXA_API_KEY`。`exa_search` 执行 Exa 网络搜索；`exa_find_similar` 查找与给定 URL 相似的内容。
+
+### 搜索规划管线（Search Planning Pipeline）
+
+结构化六阶段规划脚手架，用于在执行复杂搜索前先生成可执行的搜索计划。由 `plan_intent` 自动触发：
+
+1. **plan_intent** — 捕获用户意图为核心问题，识别搜索类型和时效性
+2. **plan_complexity** — 评估搜索复杂度（1-3 级）
+3. **plan_sub_query** — 分解为多个子查询
+4. **plan_search_term** — 为每个子查询设计搜索词
+5. **plan_tool_mapping** — 映射子查询到搜索工具
+6. **plan_execution** — 定义执行顺序（并行/串行）
+
+当 `contamination_suspected=true` 时，`plan_intent` 响应包含 `contamination_flag`，提示进入去污流程。
 
 ### 信息去污管道（Decontamination Pipeline）
 
@@ -243,16 +304,22 @@ claude mcp list
 
 **方法论**：「先问是不是，再问为什么」——先验证定义范围和事实前提，再检查数字合理性，最后分析动机。事实在动机之前。
 
-**自动触发**：在 `plan_intent` 中设置 `contamination_suspected=true` 时，规划响应会包含 `contamination_flag`，提示进入去污流程。
+**自动触发**：在 `plan_intent` 中设置 `contamination_suspected=true` 时触发。检测到 medium/high 污染后自动建议进入去污流程。
 
-包含以下工具（依次调用）：
+**环境变量控制**：
+- `DECON_THOUGHT_BUDGET=2000` — 控制每阶段 `clues` 最大字符数
 
-- **`decon_assess`** — 评估信息污染可疑程度（low/medium/high），基于主题领域、能量集中度、历史污染记录等维度
+包含以下工具（按顺序调用）：
+
+- **`decon_assess`** — 评估信息污染可疑程度（low/medium/high），基于领域能量集中度、历史污染记录、激励不对称等维度。低可疑度自动结束管线
 - **`decon_verify`** — 核验核心概念的**定义范围**和**数字合理性**。先问定义是否漂移，再问数字是否违反物理/数学边界
-- **`decon_provenance`** — 追踪关键主张的起源和传播路径，检测引用级联和洗白模式
-- **`decon_motive`** — 分析利益相关方的激励机制：谁受益、谁能控制数据生产、是否存在反叙述
+- **`decon_provenance`** — 追踪关键主张的起源和传播路径，检测引用级联和信源洗白模式
+- **`decon_motive`** — 分析利益相关方的激励机制：谁受益、谁能控制数据生产、反叙述是否存在
 - **`decon_synthesis`** — 跨激励综合：收集所有立场的信源，定位共识锚点和分歧根源
-- **`decon_patterns`** — 已知操纵模式参考卡（终端阶段，仅展示不诊断）
+- **`decon_patterns`** — 已知操纵模式参考卡（终端阶段，仅展示不做诊断）
+
+每个阶段的 `clues` 参数仅需输出关键发现（非完整推理），服务端根据 `DECON_THOUGHT_BUDGET` 自动截断。
+
 </details>
 
 ## 四、常见问题
@@ -261,7 +328,7 @@ claude mcp list
 <summary>
 Q: 必须同时配置 Grok 和 Tavily 吗？
 </summary>
-A: Grok（`GROK_API_URL` + `GROK_API_KEY`）为必填，提供核心搜索能力。Tavily 和 Firecrawl 均为可选：配置 Tavily 后 `web_fetch` 优先使用 Tavily Extract，失败时降级到 Firecrawl Scrape；两者均未配置时 `web_fetch` 将返回配置错误提示。`web_map` 依赖 Tavily。
+A: 设置 `GUDA_API_KEY` 即可获得完整的 Grok + Tavily + Firecrawl 服务。不使用 GuDa 时，Grok（`GROK_API_URL` + `GROK_API_KEY`）为必填，提供核心搜索能力。Tavily、Firecrawl、Exa 均为可选——配置后 `web_fetch` 自动走降级链，未配置时跳过对应提供者。
 </details>
 
 <details>
@@ -275,7 +342,14 @@ A: 需要 OpenAI 兼容格式的 API 地址（支持 `/chat/completions` 和 `/m
 <summary>
 Q: 如何验证配置？
 </summary>
-A: 在 Claude 对话中说"显示 grok-search 配置信息"，将自动测试 API 连接并显示结果。
+A: 在 Claude 对话中说"显示 grok-search 配置信息"，将自动测试所有已配置 API 的连接并显示结果。
+</details>
+
+<details>
+<summary>
+Q: `reasoning_effort` 在搜索中有什么用？
+</summary>
+A: 控制 Grok 模型的推理深度。高推理（xhigh/high）会消耗更多 token 和延迟。对简单搜索无关紧要；对需要深度多步推理的复杂查询（比较分析、溯源追踪）可能有帮助。
 </details>
 
 ## 致谢
@@ -293,7 +367,7 @@ A: 在 Claude 对话中说"显示 grok-search 配置信息"，将自动测试 AP
 - [wu452148993](https://github.com/wu452148993) — web_search_tool 开关配置
 - [jayhchen](https://github.com/jayhchen) — switch_model 工具始终注册
 - [shengnan-Luo](https://github.com/shengnan-Luo) — FIRECRAWL_API_URL 配置支持
-- [handsomelong922](https://github.com/handsomelong922) — SEARCH_TIMEOUT 超时配置
+- [handsomelong922](https://github.com/handsomelong922) — SEARCH_TIMEOUT 超时配置、MCP 传输协议支持、Tavily API Key 轮换
 
 ### 已评估但未整合的 Fork 特性
 
