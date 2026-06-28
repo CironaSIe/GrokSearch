@@ -330,7 +330,6 @@ A: Controls Grok model reasoning depth. High effort (xhigh/high) consumes more t
 ### Design & Reference
 
 - [Episkey-G/GrokSearch-rs](https://github.com/Episkey-G/GrokSearch-rs) — Rust GrokSearch reference implementation that inspired our specialist content extractor design (GitHub Issues/PRs, arXiv, Wikipedia, HN) and naming conventions
-- [grok2api proxy source analysis](https://github.com/GuDaStudio/grok2api) — Protocol implementation analysis that confirmed `reasoning_effort`, `max_tokens`, and `max_output_tokens` behavior across different API paths
 
 ### Community Fork Contributions
 
