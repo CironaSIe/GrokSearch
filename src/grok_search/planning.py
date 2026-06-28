@@ -346,7 +346,7 @@ class DecontaminationEngine:
         if session.decon_complete:
             result["decon_summary"] = session.build_summary()
 
-        result["can_exit"] = last_done >= 0
+        result["can_exit"] = session.decon_complete
         return result
 
 

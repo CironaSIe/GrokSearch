@@ -235,7 +235,7 @@ async def web_search(
     to_date: Annotated[str, "YYYY-MM-DD format end date filter for search results."] = "",
     allowed_domains: Annotated[str, "Comma-separated list of domains to restrict search to."] = "",
     max_search_results: Annotated[int, "Maximum number of search results to use (0 = no limit, max 20)."] = 0,
-    reasoning_effort: Annotated[str, "Reasoning effort level (low/medium/high/xhigh)."] = "",
+    reasoning_effort: Annotated[str, "Reasoning effort (low/medium/high/xhigh). Usually unnecessary for search — only set if the query requires deep multi-step analysis. Default empty = no explicit effort."] = "",
     direction: Annotated[str, "Source position: mainstream / eyewitness / adversarial / external / comprehensive, or free text (≤15 words). See description for details."] = "",
     timeout: Annotated[int, "Override timeout (seconds) for this request. 0 = use default."] = 0,
 ) -> dict:

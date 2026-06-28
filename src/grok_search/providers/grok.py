@@ -259,6 +259,8 @@ class GrokSearchProvider(BaseSearchProvider):
             payload["instructions"] = system_content
             payload["input"] = user_content
         else:
+            if effort:
+                payload["reasoning_effort"] = effort
             rp = _build_reasoning_prompt(effort)
             if rp:
                 system_content += "\n\n" + rp
