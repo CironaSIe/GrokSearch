@@ -1543,6 +1543,11 @@ async def decon_provenance(
     2. ANALYZE: Compare findings from different search directions.
     3. OUTPUT corrected search direction suggestions for the user to consider.
 
+    **Skip option:** If you already have the contamination analysis in context
+    (from conversation or prior reasoning), you can call this directly with
+    `contamination_summary` and `corrected_directions` — prior phases will be
+    auto-skipped. A warning will be issued if no search_evidence is provided.
+
     Produces:
     1. What different search directions returned — summarize, don't adjudicate.
     2. Where sources agree and disagree — describe the pattern, don't judge it.
@@ -1559,7 +1564,7 @@ async def decon_provenance(
     G = modern secondary (~0.10, reference only, must trace original source)
 
     Parameters:
-    - session_id: From decon_assess.
+    - session_id: From decon_assess (or any plan_intent session_id if skipping).
     - search_evidence: Comma-separated web_search session_ids from cross-incentive searches.
     - clues: Concise key findings from this phase.
     """,
@@ -1577,9 +1582,14 @@ async def decon_synthesis(
     budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
     if len(clues) > budget:
         clues = clues[:budget] + "..."
-    sess = decon_engine.get_session(session_id)
-    if not sess or "decon_assess" not in sess.phases:
-        return json.dumps({"error": "Call decon_assess first."})
+    if not decon_engine.get_session(session_id):
+        decon_engine.process_phase(
+            phase="decon_assess", thought="auto-created",
+            session_id=session_id,
+            phase_data={"contamination_level": "medium",
+                        "contamination_dimensions": ["contextual_knowledge"],
+                        "domain": "unknown"},
+        )
     data = {}
     if search_evidence:
         data["search_evidence"] = [s.strip() for s in search_evidence.split(",") if s.strip()]
@@ -1615,6 +1625,10 @@ async def decon_synthesis(
     Call this after decon_synthesis when contamination was detected.
     Your job is ONLY to present this reference card to the user.
     Do NOT analyze, match, or diagnose — just relay the information.
+
+    **Skip option:** Can be called directly with any session_id — prior
+    decon phases will be auto-created if absent. This is useful when
+    you want to reference the pattern card without running the full pipeline.
 
     ---
 
@@ -1655,9 +1669,14 @@ async def decon_patterns(
     budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
     if len(clues) > budget:
         clues = clues[:budget] + "..."
-    sess = decon_engine.get_session(session_id)
-    if not sess or "decon_assess" not in sess.phases:
-        return json.dumps({"error": "Call decon_assess first."})
+    if not decon_engine.get_session(session_id):
+        decon_engine.process_phase(
+            phase="decon_assess", thought="auto-created",
+            session_id=session_id,
+            phase_data={"contamination_level": "medium",
+                        "contamination_dimensions": ["contextual_knowledge"],
+                        "domain": "unknown"},
+        )
     result = decon_engine.process_phase(
         phase="decon_patterns", thought=clues, session_id=session_id,
         confidence=confidence, phase_data={},

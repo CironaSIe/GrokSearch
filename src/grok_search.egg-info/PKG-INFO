@@ -1,3 +1,19 @@
+Metadata-Version: 2.4
+Name: grok-search
+Version: 0.2.0
+Summary: MCP server for AI model search capabilities
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: fastmcp>=2.3.0
+Requires-Dist: httpx[socks]>=0.28.0
+Requires-Dist: mcp[cli]>=1.21.2
+Requires-Dist: tenacity>=8.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Dynamic: license-file
+
 ![这是图片](./images/title.png)
 <div align="center">
 

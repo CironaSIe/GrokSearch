@@ -317,8 +317,6 @@ class DecontaminationEngine:
             session.contamination_level = phase_data.get("contamination_level")
             session.contamination_dimensions = phase_data.get("contamination_dimensions", [])
             if session.contamination_level in (None, "low"):
-                session.decon_complete = True
-                # low suspicion: auto-mark remaining decon phases as skipped
                 for p in DECON_PHASE_NAMES:
                     if p not in session.phases and p != "decon_assess":
                         session.phases[p] = PhaseRecord(
@@ -326,6 +324,16 @@ class DecontaminationEngine:
                             data={"skipped": True, "reason": "low contamination suspicion"},
                         )
                 session.decon_complete = True
+
+        if phase in ("decon_synthesis", "decon_patterns") and "decon_assess" not in session.phases:
+            session.phases["decon_assess"] = PhaseRecord(
+                phase="decon_assess",
+                thought="auto-created: analysis already in LLM context, prior phases skipped",
+                data={"contamination_level": "medium",
+                      "contamination_dimensions": ["contextual_knowledge"],
+                      "_skip_note": "Prior decon phases auto-skipped: LLM has analysis in context"},
+            )
+            session.contamination_level = "medium"
 
         if phase == "decon_synthesis":
             session.decon_complete = True

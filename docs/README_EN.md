@@ -325,6 +325,17 @@ Q: What is `reasoning_effort` for?
 A: Controls Grok model reasoning depth. High effort (xhigh/high) consumes more tokens and latency. Usually unnecessary for simple search queries; may help with complex multi-step analysis.
 </details>
 
+<details>
+<summary>
+Q: What is the Decontamination Pipeline for?
+</summary>
+A: It helps detect information contamination (data manipulation, agenda-driven narratives, definition drift) using a **Geiger counter** approach — detect signal strength, alert proportionally, never diagnose. All judgments are made by the LLM user.
+
+The pipeline is optional. Set `contamination_suspected=true` in `plan_intent` to trigger a flag. At medium/high suspicion, phases run in order: assess → verify → provenance → motive → synthesis → patterns. If the LLM already has the analysis in context (from conversation), it can skip directly to `decon_synthesis` or `decon_patterns` without running prior phases.
+
+**To disable**: simply never set `contamination_suspected=true` in `plan_intent`. No env var or config change needed. Or set it to `false` (default).
+</details>
+
 ## Acknowledgments
 
 ### Design & Reference
