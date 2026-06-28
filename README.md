@@ -354,6 +354,13 @@ A: 控制 Grok 模型的推理深度。高推理（xhigh/high）会消耗更多 
 
 ## 致谢
 
+### 设计与参考
+
+- [Episkey-G/GrokSearch-rs](https://github.com/Episkey-G/GrokSearch-rs) — Rust 版 GrokSearch 参考实现，为我们设计 specialist content extractor（GitHub Issues/PRs、arXiv、Wikipedia、HN）和命名方式提供了重要启发
+- [Grok API 镜像代理源码分析](https://github.com/GuDaStudio/grok2api) — 上游 grok2api 的协议实现分析帮助我们确认了 `reasoning_effort`、`max_tokens`、`max_output_tokens` 等参数在各 API 路径下的实际行为
+
+### 社区 Fork 贡献
+
 本项目整合了以下社区 fork 的贡献（已验证 fork 分支上的独立提交）：
 
 - [Techd81](https://github.com/Techd81) — 搜索参数增强（from_date/to_date、reasoning_effort）、错误信息脱敏、URL 正则改进、streaming HTTP 错误处理、multi-agent Responses API 适配
