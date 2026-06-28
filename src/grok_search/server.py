@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -1191,13 +1192,16 @@ async def plan_execution(
 )
 async def decon_assess(
     session_id: Annotated[str, "Session ID from plan_intent"],
-    thought: Annotated[str, "Reasoning for contamination assessment"],
+    clues: Annotated[str, "Concise key findings (max 2000 chars). Not a full reasoning transcript — just the conclusions and detected patterns the next phase needs."],
     domain: Annotated[str, "Domain/topic being assessed"],
     contamination_level: Annotated[str, "low | medium | high"] = "low",
     contamination_dimensions: Annotated[str, "Comma-separated detected dimensions (e.g. 'source_concentration,incentive_asymmetry')"] = "",
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
+    if len(clues) > budget:
+        clues = clues[:budget] + "..."
     if not planning_engine.get_session(session_id):
         return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
     data = {
@@ -1206,7 +1210,7 @@ async def decon_assess(
         "domain": domain,
     }
     return json.dumps(decon_engine.process_phase(
-        phase="decon_assess", thought=thought, session_id=session_id,
+        phase="decon_assess", thought=clues, session_id=session_id,
         confidence=confidence, phase_data=data,
     ), ensure_ascii=False, indent=2)
 
@@ -1229,13 +1233,16 @@ async def decon_assess(
 )
 async def decon_motive(
     session_id: Annotated[str, "Session ID from decon_assess"],
-    thought: Annotated[str, "Reasoning for incentive analysis"],
+    clues: Annotated[str, "Concise key findings (max 2000 chars). Not full reasoning — just conclusions and detected incentive patterns."],
     key_claims: Annotated[str, "Comma-separated core claims to analyze"] = "",
     narrative_analysis: Annotated[str, "JSON array: [{narrative, beneficiaries, incentive_asymmetry}]"] = "",
     overall_assessment: Annotated[str, "Summary of incentive analysis findings"] = "",
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
+    if len(clues) > budget:
+        clues = clues[:budget] + "..."
     sess = decon_engine.get_session(session_id)
     if not sess or "decon_assess" not in sess.phases:
         return json.dumps({"error": "Call decon_assess first."})
@@ -1250,7 +1257,7 @@ async def decon_motive(
     if overall_assessment:
         data["overall_assessment"] = overall_assessment
     return json.dumps(decon_engine.process_phase(
-        phase="decon_motive", thought=thought, session_id=session_id,
+        phase="decon_motive", thought=clues, session_id=session_id,
         confidence=confidence, phase_data=data,
     ), ensure_ascii=False, indent=2)
 
@@ -1285,7 +1292,7 @@ async def decon_motive(
 )
 async def decon_verify(
     session_id: Annotated[str, "Session ID from decon_assess"],
-    thought: Annotated[str, "Reasoning for verification"],
+    clues: Annotated[str, "Concise key findings (max 2000 chars). Conclusions and detected definitional/numerical anomalies."],
     key_concepts: Annotated[str, "Comma-separated core concepts to check for definitional bias"] = "",
     statistical_claims: Annotated[str, "Comma-separated numerical claims to verify"] = "",
     search_baselines: Annotated[bool, "Set true if you will search for external baseline data via web_search first"] = False,
@@ -1294,6 +1301,9 @@ async def decon_verify(
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
+    if len(clues) > budget:
+        clues = clues[:budget] + "..."
     sess = decon_engine.get_session(session_id)
     if not sess or "decon_assess" not in sess.phases:
         return json.dumps({"error": "Call decon_assess first."})
@@ -1312,7 +1322,7 @@ async def decon_verify(
     if overall_assessment:
         data["overall"] = overall_assessment
     result = decon_engine.process_phase(
-        phase="decon_verify", thought=thought, session_id=session_id,
+        phase="decon_verify", thought=clues, session_id=session_id,
         confidence=confidence, phase_data=data,
     )
     if search_baselines and not check_results:
@@ -1358,19 +1368,22 @@ async def decon_verify(
     - claims_to_trace: Comma-separated specific claims to trace.
     - search_evidence: Comma-separated web_search session_ids as proof of search (REQUIRED).
     - max_searches: Maximum search attempts per claim (default 5).
-    - thought: Reasoning for this tracing.
+    - clues: Concise key findings from this phase.
     """,
 )
 async def decon_provenance(
     session_id: Annotated[str, "Session ID from decon_assess"],
-    thought: Annotated[str, "Reasoning for provenance tracing"],
     claims_to_trace: Annotated[str, "Comma-separated claims to trace"],
+    clues: Annotated[str, "Concise key findings (max 2000 chars). Tracking results and laundering detection patterns."],
     search_evidence: Annotated[str, "Comma-separated web_search session_ids as proof of search"] = "",
     max_searches: Annotated[int, "Max search attempts per claim"] = 5,
     provenance_chains: Annotated[str, "JSON array: [{claim, origin, laundering_path, verification_added, conclusion, confidence}]"] = "",
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
+    if len(clues) > budget:
+        clues = clues[:budget] + "..."
     sess = decon_engine.get_session(session_id)
     if not sess or "decon_assess" not in sess.phases:
         return json.dumps({"error": "Call decon_assess first."})
@@ -1386,7 +1399,7 @@ async def decon_provenance(
         except json.JSONDecodeError:
             pass
     result = decon_engine.process_phase(
-        phase="decon_provenance", thought=thought, session_id=session_id,
+        phase="decon_provenance", thought=clues, session_id=session_id,
         confidence=confidence, phase_data=data,
     )
     if not search_evidence and provenance_chains:
@@ -1427,12 +1440,12 @@ async def decon_provenance(
     Parameters:
     - session_id: From decon_assess.
     - search_evidence: Comma-separated web_search session_ids from cross-incentive searches.
-    - thought: Reasoning for this synthesis.
+    - clues: Concise key findings from this phase.
     """,
 )
 async def decon_synthesis(
     session_id: Annotated[str, "Session ID from decon_assess"],
-    thought: Annotated[str, "Reasoning for cross-incentive synthesis"],
+    clues: Annotated[str, "Concise key findings (max 2000 chars). Cross-incentive patterns and corrected directions."],
     search_evidence: Annotated[str, "Comma-separated web_search session_ids from cross-incentive searches"] = "",
     corrected_directions: Annotated[str, "JSON array: [{original_term, corrected_term, bias_correction}]"] = "",
     source_reliability: Annotated[str, "JSON object mapped to A-G tiering: {tier_A: {weight, caution, example_sources}}. See description for tier definitions."] = "",
@@ -1440,6 +1453,9 @@ async def decon_synthesis(
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
+    if len(clues) > budget:
+        clues = clues[:budget] + "..."
     sess = decon_engine.get_session(session_id)
     if not sess or "decon_assess" not in sess.phases:
         return json.dumps({"error": "Call decon_assess first."})
@@ -1459,7 +1475,7 @@ async def decon_synthesis(
     if contamination_summary:
         data["contamination_summary"] = contamination_summary
     result = decon_engine.process_phase(
-        phase="decon_synthesis", thought=thought, session_id=session_id,
+        phase="decon_synthesis", thought=clues, session_id=session_id,
         confidence=confidence, phase_data=data,
     )
     if not search_evidence and (corrected_directions or contamination_summary):
@@ -1511,15 +1527,18 @@ async def decon_synthesis(
 )
 async def decon_patterns(
     session_id: Annotated[str, "Session ID from decon_assess"],
-    thought: Annotated[str, "Reasoning for presenting patterns reference"],
+    clues: Annotated[str, "Concise key findings (max 2000 chars). Patterns that resonated with the investigation."],
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
+    if len(clues) > budget:
+        clues = clues[:budget] + "..."
     sess = decon_engine.get_session(session_id)
     if not sess or "decon_assess" not in sess.phases:
         return json.dumps({"error": "Call decon_assess first."})
     result = decon_engine.process_phase(
-        phase="decon_patterns", thought=thought, session_id=session_id,
+        phase="decon_patterns", thought=clues, session_id=session_id,
         confidence=confidence, phase_data={},
     )
     return json.dumps(result, ensure_ascii=False, indent=2)
