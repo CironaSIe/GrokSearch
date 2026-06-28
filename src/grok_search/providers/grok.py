@@ -229,7 +229,6 @@ class GrokSearchProvider(BaseSearchProvider):
             )
 
         effort = _valid_reasoning_effort(reasoning_effort) or self.reasoning_effort
-        rp = _build_reasoning_prompt(effort)
 
         dir_prompt = ""
         if direction:
@@ -249,16 +248,20 @@ class GrokSearchProvider(BaseSearchProvider):
         controls = ("\n\n[Search Controls]\n" + "\n".join(f"- {line}" for line in prompt_lines)) if prompt_lines else ""
 
         system_content = search_prompt
-        if rp:
-            system_content += "\n\n" + rp
         if dir_prompt:
             system_content += dir_prompt
         user_content = time_context + query + controls
 
         if self._use_responses_api:
+            if effort:
+                api_effort = "high" if effort == "xhigh" else effort
+                payload["reasoning"] = {"effort": api_effort}
             payload["instructions"] = system_content
             payload["input"] = user_content
         else:
+            rp = _build_reasoning_prompt(effort)
+            if rp:
+                system_content += "\n\n" + rp
             payload["messages"] = [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content},

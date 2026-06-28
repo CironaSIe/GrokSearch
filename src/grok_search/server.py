@@ -648,81 +648,95 @@ async def web_map(
 async def get_config_info() -> str:
     import json
     import httpx
+    import time
+    import asyncio
 
     config_info = config.get_config_info()
 
-    # 添加连接测试
-    test_result = {
-        "status": "未测试",
-        "message": "",
-        "response_time_ms": 0
-    }
+    transport = "responses" if (
+        config.force_responses_api or "multi-agent" in config.grok_model.lower()
+    ) else "chat_completions"
 
-    try:
-        api_url = config.grok_api_url
-        api_key = config.grok_api_key
-
-        # 构建 /models 端点 URL
-        models_url = f"{api_url.rstrip('/')}/models"
-
-        # 发送测试请求
-        import time
-        start_time = time.time()
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                models_url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
+    async def _probe_grok():
+        try:
+            api_url = config.grok_api_url
+            api_key = config.grok_api_key
+            models_url = f"{api_url.rstrip('/')}/models"
+            start = time.time()
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    models_url,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                )
+                ms = round((time.time() - start) * 1000, 2)
+                models = []
+                if resp.status_code == 200:
+                    try:
+                        data = resp.json()
+                        if "data" in data and isinstance(data["data"], list):
+                            models = [m["id"] for m in data["data"] if isinstance(m, dict) and "id" in m]
+                    except Exception:
+                        pass
+                return {
+                    "api_url": config_info.get("GROK_API_URL", ""),
+                    "model": config.grok_model,
+                    "auth_mode": "api_key",
+                    "web_search_enabled": config.web_search_tool_enabled,
+                    "x_search_enabled": transport == "responses",
+                    "reachable": resp.status_code == 200,
+                    "detail": "ok" if resp.status_code == 200 else f"HTTP {resp.status_code}",
+                    "response_time_ms": ms,
+                    "available_models": models,
                 }
-            )
+        except httpx.TimeoutException:
+            return {"api_url": config_info.get("GROK_API_URL", ""), "model": config.grok_model, "auth_mode": "api_key", "reachable": False, "detail": "timeout", "response_time_ms": 5000}
+        except Exception as e:
+            return {"api_url": config_info.get("GROK_API_URL", ""), "model": config.grok_model, "auth_mode": "api_key", "reachable": False, "detail": str(e)[:200]}
 
-            response_time = (time.time() - start_time) * 1000  # 转换为毫秒
+    async def _probe_tavily():
+        if not config.tavily_api_key:
+            return {"api_url": config.tavily_api_url, "configured": False, "reachable": None, "detail": "skipped (not configured)"}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(config.tavily_api_url)
+                return {"api_url": config.tavily_api_url, "configured": True, "reachable": True, "detail": "ok"}
+        except Exception as e:
+            return {"api_url": config.tavily_api_url, "configured": True, "reachable": False, "detail": str(e)[:100]}
 
-            if response.status_code == 200:
-                test_result["status"] = "✅ 连接成功"
-                test_result["message"] = f"成功获取模型列表 (HTTP {response.status_code})"
-                test_result["response_time_ms"] = round(response_time, 2)
+    async def _probe_firecrawl():
+        if not config.firecrawl_api_key:
+            return {"api_url": config.firecrawl_api_url, "configured": False, "reachable": None, "detail": "skipped (not configured)"}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(config.firecrawl_api_url)
+                return {"api_url": config.firecrawl_api_url, "configured": True, "reachable": True, "detail": "ok"}
+        except Exception as e:
+            return {"api_url": config.firecrawl_api_url, "configured": True, "reachable": False, "detail": str(e)[:100]}
 
-                # 尝试解析返回的模型列表
-                try:
-                    models_data = response.json()
-                    if "data" in models_data and isinstance(models_data["data"], list):
-                        model_count = len(models_data["data"])
-                        test_result["message"] += f"，共 {model_count} 个模型"
+    grok_status, tavily_status, firecrawl_status = await asyncio.gather(
+        _probe_grok(), _probe_tavily(), _probe_firecrawl()
+    )
 
-                        # 提取所有模型的 ID/名称
-                        model_names = []
-                        for model in models_data["data"]:
-                            if isinstance(model, dict) and "id" in model:
-                                model_names.append(model["id"])
+    connection_ok = grok_status.get("reachable", False)
 
-                        if model_names:
-                            test_result["available_models"] = model_names
-                except:
-                    pass
-            else:
-                test_result["status"] = "⚠️ 连接异常"
-                test_result["message"] = f"HTTP {response.status_code}: {response.text[:100]}"
-                test_result["response_time_ms"] = round(response_time, 2)
-
-    except httpx.TimeoutException:
-        test_result["status"] = "❌ 连接超时"
-        test_result["message"] = "请求超时（10秒），请检查网络连接或 API URL"
-    except httpx.RequestError as e:
-        test_result["status"] = "❌ 连接失败"
-        test_result["message"] = f"网络错误: {str(e)}"
-    except ValueError as e:
-        test_result["status"] = "❌ 配置错误"
-        test_result["message"] = str(e)
-    except Exception as e:
-        test_result["status"] = "❌ 测试失败"
-        test_result["message"] = f"未知错误: {str(e)}"
-
-    config_info["connection_test"] = test_result
-
-    return json.dumps(config_info, ensure_ascii=False, indent=2)
+    return json.dumps({
+        "config": config_info,
+        "transport": transport,
+        "status": "✅ 连接成功" if connection_ok else "⚠️ 部分服务不可用",
+        "grok": grok_status,
+        "tavily": tavily_status,
+        "firecrawl": firecrawl_status,
+        "connection_test": {
+            "status": "✅ 连接成功" if connection_ok else "❌ 连接失败",
+            "message": f"Grok: {'可达' if connection_ok else '不可达'}, "
+                       f"Tavily: {tavily_status.get('detail', '未知')}, "
+                       f"Firecrawl: {firecrawl_status.get('detail', '未知')}",
+            "response_time_ms": grok_status.get("response_time_ms", 0),
+            "available_models": grok_status.get("available_models", []),
+        },
+    }, ensure_ascii=False, indent=2)
 
 
 @mcp.tool(
