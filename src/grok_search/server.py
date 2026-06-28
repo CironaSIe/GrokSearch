@@ -8,7 +8,7 @@ if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
 from fastmcp import FastMCP, Context
-from typing import Annotated
+from typing import Annotated, Any
 from pydantic import Field
 
 # 尝试使用绝对导入（支持 mcp run）
@@ -286,7 +286,7 @@ async def web_search(
             tavily_count = extra_sources
 
     # 并行执行搜索任务
-    async def _safe_grok() -> str:
+    async def _safe_grok() -> list | str:
         try:
             return await grok_provider.search(
                 random.choice(SEARCH_FRAMINGS).format(query=query),
@@ -327,10 +327,12 @@ async def web_search(
     firecrawl_results: list[dict] | None = None
     idx = 1
     if tavily_count > 0:
-        tavily_results = gathered[idx]
+        result = gathered[idx]
+        tavily_results = result if isinstance(result, list) else None
         idx += 1
     if firecrawl_count > 0:
-        firecrawl_results = gathered[idx]
+        result = gathered[idx]
+        firecrawl_results = result if isinstance(result, list) else None
 
     answer, grok_sources = split_answer_and_sources(grok_result)
     extra = _extra_results_to_sources(tavily_results, firecrawl_results)
@@ -638,7 +640,7 @@ async def web_fetch(
     url: Annotated[str, "Valid HTTP/HTTPS web address."],
     timeout: Annotated[int, "Override timeout (seconds). 0 = use default."] = 0,
     provider: Annotated[str, "Backend selection: auto | python | tavily | firecrawl | grok"] = "auto",
-    ctx: Context = None
+    ctx: Context | None = None
 ) -> str:
     ft = timeout if timeout > 0 else config.fetch_timeout_seconds
 
@@ -665,7 +667,7 @@ async def web_fetch(
     return "提取失败: 所有提取服务均未能获取内容"
 
 
-async def _call_tavily_map(url: str, instructions: str = None, max_depth: int = 1,
+async def _call_tavily_map(url: str, instructions: str | None = None, max_depth: int = 1,
                            max_breadth: int = 20, limit: int = 50, timeout: int = 150) -> str:
     import httpx
     import json
@@ -1036,7 +1038,7 @@ async def plan_intent(
     is_revision: Annotated[bool, "True to overwrite existing intent"] = False,
 ) -> str:
     import json
-    data = {"core_question": core_question, "query_type": query_type, "time_sensitivity": time_sensitivity}
+    data: dict[str, Any] = {"core_question": core_question, "query_type": query_type, "time_sensitivity": time_sensitivity}
     if domain:
         data["domain"] = domain
     if not premise_valid:
@@ -1140,7 +1142,7 @@ async def plan_sub_query(
     import json
     if not planning_engine.get_session(session_id):
         return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
-    item = {"id": id, "goal": goal, "expected_output": expected_output, "boundary": boundary}
+    item: dict[str, Any] = {"id": id, "goal": goal, "expected_output": expected_output, "boundary": boundary}
     if depends_on:
         item["depends_on"] = _split_csv(depends_on)
     if tool_hint:
@@ -1195,7 +1197,7 @@ async def plan_search_term(
     import json
     if not planning_engine.get_session(session_id):
         return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
-    data = {"search_terms": [{"term": term, "purpose": purpose, "round": round}]}
+    data: dict[str, Any] = {"search_terms": [{"term": term, "purpose": purpose, "round": round}]}
     if approach:
         data["approach"] = approach
     if fallback_plan:
