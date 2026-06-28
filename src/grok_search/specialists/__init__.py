@@ -1,0 +1,95 @@
+from enum import StrEnum
+from abc import ABC, abstractmethod
+from urllib.parse import urlparse
+import httpx
+
+
+class SourceType(StrEnum):
+    GITHUB_ISSUE = "github_issue"
+    GITHUB_PULL = "github_pull"
+    ARXIV = "arxiv"
+    WIKIPEDIA = "wikipedia"
+    HACKER_NEWS = "hacker_news"
+
+
+GLOBAL_UA = "GrokSearch/1.0 (https://github.com/GuDaStudio/GrokSearch)"
+
+
+class SourceExtractor(ABC):
+    @abstractmethod
+    def match(self, url: str) -> bool:
+        ...
+
+    @abstractmethod
+    def kind(self) -> SourceType:
+        ...
+
+    @abstractmethod
+    async def fetch_render(self, client: httpx.AsyncClient, url: str) -> str | None:
+        ...
+
+
+class SourceRouter:
+    def __init__(self, github_token: str | None = None,
+                 http_proxy: str | None = None,
+                 https_proxy: str | None = None):
+        from .github import GithubIssueExtractor, GithubPrExtractor
+        from .arxiv import ArxivExtractor
+        from .wikipedia import WikipediaExtractor
+        from .hackernews import HackerNewsExtractor
+
+        self._extractors: list[SourceExtractor] = [
+            GithubIssueExtractor(github_token),
+            GithubPrExtractor(github_token),
+            ArxivExtractor(),
+            WikipediaExtractor(),
+            HackerNewsExtractor(),
+        ]
+        self._http_proxy = http_proxy
+        self._https_proxy = https_proxy
+
+    def _clean_url(self, url: str) -> str | None:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return None
+        cleaned = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        if parsed.query:
+            cleaned += f"?{parsed.query}"
+        return cleaned
+
+    def resolve(self, url: str) -> SourceExtractor | None:
+        cleaned = self._clean_url(url)
+        if cleaned is None:
+            return None
+        for ex in self._extractors:
+            if ex.match(cleaned):
+                return ex
+        return None
+
+    async def fetch(self, url: str, timeout: int | float) -> str | None:
+        cleaned = self._clean_url(url)
+        if cleaned is None:
+            return None
+        extractor = self.resolve(url)
+        if extractor is None:
+            return None
+        try:
+            proxies = {}
+            if self._http_proxy:
+                proxies["http://"] = self._http_proxy
+            if self._https_proxy:
+                proxies["https://"] = self._https_proxy
+            if not proxies:
+                proxies = None
+
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                proxies=proxies,
+                follow_redirects=True,
+            ) as client:
+                content = await extractor.fetch_render(client, cleaned)
+                if content and content.strip():
+                    return content
+        except Exception:
+            pass
+        return None

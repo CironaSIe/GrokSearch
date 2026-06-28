@@ -124,6 +124,22 @@ class Config:
         return int(os.getenv("FETCH_TIMEOUT", "90"))
 
     @property
+    def github_token(self) -> str | None:
+        return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+
+    @property
+    def specialist_http_proxy(self) -> str | None:
+        return os.environ.get("SPECIALIST_HTTP_PROXY")
+
+    @property
+    def specialist_https_proxy(self) -> str | None:
+        return os.environ.get("SPECIALIST_HTTPS_PROXY")
+
+    @property
+    def specialist_enabled(self) -> bool:
+        return os.environ.get("SPECIALIST_ENABLED", "true").lower() not in ("false", "0", "no")
+
+    @property
     def grok_fetch_fallback_enabled(self) -> bool:
         return os.getenv("GROK_FETCH_FALLBACK", "true").lower() in ("true", "1", "yes")
 
@@ -231,6 +247,10 @@ class Config:
             "FIRECRAWL_API_KEY": self._mask_api_key(self.firecrawl_api_key) if self.firecrawl_api_key else "未配置",
             "EXA_API_KEY": self._mask_api_key(self.exa_api_key) if self.exa_api_key else "未配置",
             "EXA_BASE_URL": self.exa_base_url,
+            "GITHUB_TOKEN": self._mask_api_key(self.github_token) if self.github_token else "未配置",
+            "SPECIALIST_HTTP_PROXY": self.specialist_http_proxy or "未配置",
+            "SPECIALIST_HTTPS_PROXY": self.specialist_https_proxy or "未配置",
+            "SPECIALIST_ENABLED": self.specialist_enabled,
             "config_status": config_status
         }
 

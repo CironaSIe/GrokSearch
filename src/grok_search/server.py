@@ -33,6 +33,19 @@ import asyncio, random, httpx
 
 mcp = FastMCP("grok-search")
 
+# ── Specialist SourceRouter ─────────────────────────────────────────────
+try:
+    from grok_search.specialists import SourceRouter
+    _source_router = SourceRouter(
+        github_token=config.github_token,
+        http_proxy=config.specialist_http_proxy,
+        https_proxy=config.specialist_https_proxy,
+    )
+    if not config.specialist_enabled:
+        _source_router = None
+except ImportError:
+    _source_router = None
+
 
 def _register_exa_if_configured(mcp: FastMCP):
     if not config.exa_api_key:
@@ -500,53 +513,152 @@ async def _call_firecrawl_scrape(url: str, ctx=None, timeout: int | None = None)
     return None
 
 
+_PROVIDER_PRIORITIES = {
+    "auto":     ["python", "tavily", "firecrawl", "grok"],
+    "python":   ["python"],
+    "tavily":   ["tavily"],
+    "firecrawl":["firecrawl"],
+    "grok":     ["grok"],
+}
+
+
+async def _try_fetch_python(url: str, timeout: int) -> str | None:
+    try:
+        from trafilatura import extract
+    except ImportError:
+        return None
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; GrokSearch/1.0; +https://github.com/GuDaStudio/GrokSearch)"},
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            if "text/html" not in resp.headers.get("content-type", ""):
+                return None
+            md = extract(
+                resp.text,
+                output_format="markdown",
+                include_comments=False,
+                fast=True,
+            )
+            return md if md and md.strip() else None
+    except Exception:
+        return None
+
+
+async def _try_fetch_grok(url: str, timeout: int) -> str | None:
+    if not config.grok_fetch_fallback_enabled:
+        return None
+    try:
+        api_url = config.grok_api_url
+        api_key = config.grok_api_key
+    except ValueError:
+        return None
+    provider = GrokSearchProvider(api_url, api_key, config.grok_model, timeout=timeout)
+    return await provider.fetch(url, None)
+
+
+_BACKEND_DISPATCH = {
+    "python": _try_fetch_python,
+    "tavily": _call_tavily_extract,
+    "firecrawl": _call_firecrawl_scrape,
+    "grok": _try_fetch_grok,
+}
+
+
+def _build_fetch_description() -> str:
+    available = []
+    if _source_router is not None:
+        available.append("specialist (Wikipedia/arXiv/GitHub/HN)")
+    try:
+        import trafilatura  # noqa: F401
+        available.append("python (trafilatura)")
+    except ImportError:
+        pass
+    if config.tavily_api_key:
+        available.append("tavily")
+    if config.firecrawl_api_key:
+        available.append("firecrawl")
+    try:
+        if config.grok_fetch_fallback_enabled:
+            available.append("grok")
+    except ValueError:
+        pass
+    backends = ", ".join(available) if available else "none"
+
+    override_lines = []
+    if "python (trafilatura)" in available:
+        override_lines.append("    - `python`: fastest, zero cost — static HTML only, no JS rendering")
+    if "tavily" in available:
+        override_lines.append("    - `tavily`: general-purpose extract")
+    if "firecrawl" in available:
+        override_lines.append("    - `firecrawl`: JS-rendered / SPA pages (use only when you know the page needs JS)")
+    if "grok" in available:
+        override_lines.append("    - `grok`: LLM-based fetch, slowest — last resort")
+    override_str = "\n".join(override_lines) if override_lines else "    (no overridable backends available)"
+
+    return f"""
+    Fetches URL content as structured Markdown via automatic multi-backend fallback.
+
+    **Recommended: use `provider=auto` (default).**
+    The server tries each backend in order and falls through on failure.
+    You rarely need to specify a provider — let `auto` handle it.
+
+    **When to override `provider`:**
+{override_str}
+
+    **Timeout:** default {config.fetch_timeout_seconds}s. Increase for slow pages.
+
+    **Available backends (runtime):** {backends}
+    """
+
+
+_WEB_FETCH_DESC = _build_fetch_description()
+
+
+async def _try_fetch_backend(name: str, url: str, timeout: int, ctx) -> str | None:
+    fn = _BACKEND_DISPATCH.get(name)
+    if fn is None:
+        return None
+    try:
+        return await fn(url, timeout)
+    except Exception:
+        return None
+
+
 @mcp.tool(
     name="web_fetch",
     output_schema=None,
-    description="""
-    Fetches URL content as structured Markdown. Tries Tavily → Firecrawl → Grok fallback.
-
-    **Limitations:**
-        - May not capture JavaScript-rendered content.
-        - URL must be publicly accessible (no auth/paywalls).
-    """,
-    meta={"version": "1.3.0", "author": "guda.studio"},
+    description=_WEB_FETCH_DESC,
+    meta={"version": "2.0.0", "author": "guda.studio"},
 )
 async def web_fetch(
     url: Annotated[str, "Valid HTTP/HTTPS web address."],
     timeout: Annotated[int, "Override timeout (seconds). 0 = use default."] = 0,
+    provider: Annotated[str, "Backend selection: auto | python | tavily | firecrawl | grok"] = "auto",
     ctx: Context = None
 ) -> str:
     ft = timeout if timeout > 0 else config.fetch_timeout_seconds
 
     await log_info(ctx, f"Begin Fetch: {url}", config.debug_enabled)
 
-    result = await _call_tavily_extract(url, ft)
-    if result:
-        await log_info(ctx, "Fetch Finished (Tavily)!", config.debug_enabled)
-        return result
-
-    await log_info(ctx, "Tavily unavailable or failed, trying Firecrawl...", config.debug_enabled)
-    result = await _call_firecrawl_scrape(url, ctx, ft)
-    if result:
-        await log_info(ctx, "Fetch Finished (Firecrawl)!", config.debug_enabled)
-        return result
-
-    # Grok fallback
-    if config.grok_fetch_fallback_enabled:
-        await log_info(ctx, "Firecrawl unavailable or failed, trying Grok...", config.debug_enabled)
-        try:
-            api_url = config.grok_api_url
-            api_key = config.grok_api_key
-        except ValueError as e:
-            await log_info(ctx, f"Grok fetch fallback: {e}", config.debug_enabled)
-            return "提取失败: 所有提取服务均未能获取内容"
-        provider = GrokSearchProvider(api_url, api_key, config.grok_model, timeout=ft)
-        result = await provider.fetch(url, ctx)
+    # Stage 0: Specialist (always tried when URL matches a known pattern)
+    if _source_router:
+        result = await _source_router.fetch(url, ft)
         if result:
-            await log_info(ctx, "Fetch Finished (Grok)!", config.debug_enabled)
+            await log_info(ctx, "Fetch Finished (Specialist)!", config.debug_enabled)
             return result
 
+    # Stage 1-N: Generic backends in provider order
+    for name in _PROVIDER_PRIORITIES.get(provider, ["python"]):
+        result = await _try_fetch_backend(name, url, ft, ctx)
+        if result:
+            await log_info(ctx, f"Fetch Finished ({name})!", config.debug_enabled)
+            return result
+
+    # All failed
     await log_info(ctx, "Fetch Failed!", config.debug_enabled)
     if not config.tavily_api_key and not config.firecrawl_api_key:
         return "配置错误: TAVILY_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
@@ -722,6 +834,14 @@ async def get_config_info() -> str:
 
     connection_ok = grok_status.get("reachable", False)
 
+    specialist_status = {
+        "enabled": _source_router is not None,
+        "github_token": "已配置" if config.github_token else "未配置",
+        "proxies": "已配置" if (config.specialist_http_proxy or config.specialist_https_proxy) else "未配置",
+    }
+    if _source_router:
+        specialist_status["extractors"] = [str(e.kind().value) for e in _source_router._extractors]
+
     return json.dumps({
         "config": config_info,
         "transport": transport,
@@ -729,6 +849,7 @@ async def get_config_info() -> str:
         "grok": grok_status,
         "tavily": tavily_status,
         "firecrawl": firecrawl_status,
+        "specialist": specialist_status,
         "connection_test": {
             "status": "✅ 连接成功" if connection_ok else "❌ 连接失败",
             "message": f"Grok: {'可达' if connection_ok else '不可达'}, "
