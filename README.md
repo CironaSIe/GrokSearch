@@ -179,6 +179,7 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_RETRY_MAX_WAIT` | ❌ | `10` | 重试最大等待秒数 |
 | `MCP_TRANSPORT` | ❌ | `stdio` | MCP 传输协议（stdio/http/sse/streamable-http） |
 | `DECON_THOUGHT_BUDGET` | ❌ | `2000` | 去污管线每阶段 clues 最大字符数 |
+| `GROK_DECON_ENABLED` | ❌ | `true` | 是否启用去污管线（设为 false 关闭） |
 | `SPECIALIST_HTTP_PROXY` | ❌ | - | Specialist 抓取的 HTTP 代理（独立于系统代理） |
 | `SPECIALIST_HTTPS_PROXY` | ❌ | - | Specialist 抓取的 HTTPS 代理 |
 
@@ -307,6 +308,7 @@ Python 原生抓取需要安装 trafilatura（`pip install trafilatura`），未
 **自动触发**：在 `plan_intent` 中设置 `contamination_suspected=true` 时触发。检测到 medium/high 污染后自动建议进入去污流程。
 
 **环境变量控制**：
+- `GROK_DECON_ENABLED=true` — 设为 `false` 停止整个去污管线（工具返回错误、plan_intent 描述移除）
 - `DECON_THOUGHT_BUDGET=2000` — 控制每阶段 `clues` 最大字符数
 
 包含以下工具（按顺序调用）：

@@ -661,7 +661,7 @@ async def web_fetch(
     # All failed
     await log_info(ctx, "Fetch Failed!", config.debug_enabled)
     if not config.tavily_api_key and not config.firecrawl_api_key:
-        return "配置错误: TAVILY_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
+        return "配置错误: 未配置第三方搜索服务的 API Key"
     return "提取失败: 所有提取服务均未能获取内容"
 
 
@@ -672,7 +672,7 @@ async def _call_tavily_map(url: str, instructions: str = None, max_depth: int = 
     api_url = config.tavily_api_url
     api_key = config.tavily_api_key
     if not api_key:
-        return "配置错误: TAVILY_API_KEY 未配置，请设置环境变量 TAVILY_API_KEY"
+        return "地图搜索不可用：未配置 Tavily API"
     endpoint = f"{_normalize_tavily_api_base_url(api_url)}/map"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = _build_tavily_map_body(url, instructions, max_depth, max_breadth, limit, timeout)
@@ -982,10 +982,19 @@ async def toggle_builtin_tools(
     }, ensure_ascii=False, indent=2)
 
 
+_DECON_PIPELINE_DESC = (
+    "    **Contamination side-pipeline** (skippable, see contamination_flag in response):\n"
+    "    decon_assess → decon_verify → decon_provenance →\n"
+    "    decon_motive → decon_synthesis → decon_patterns"
+    if __import__("grok_search.config", fromlist=["config"]).config.decon_enabled
+    else "    (Decontamination pipeline is disabled. Enable it in server configuration to use this feature.)"
+)
+
+
 @mcp.tool(
     name="plan_intent",
     output_schema=None,
-    description="""
+    description=f"""
     Phase 1/6: Capture user intent into a core question.
     Call this FIRST — returns session_id for subsequent phases.
     Previous: (none — start here)
@@ -1009,9 +1018,7 @@ async def toggle_builtin_tools(
     Full pipeline: plan_intent → plan_complexity → plan_sub_query(×N) →
     plan_search_term(×N) → plan_tool_mapping(×N, skip if all web_search) → plan_execution
 
-    **Contamination side-pipeline** (skippable, see contamination_flag in response):
-    decon_assess → decon_verify → decon_provenance →
-    decon_motive → decon_synthesis → decon_patterns
+{_DECON_PIPELINE_DESC}
     """,
 )
 async def plan_intent(
@@ -1320,6 +1327,8 @@ async def decon_assess(
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    if not config.decon_enabled:
+        return json.dumps({"error": "Decontamination pipeline is disabled"})
     budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
     if len(clues) > budget:
         clues = clues[:budget] + "..."
@@ -1361,6 +1370,8 @@ async def decon_motive(
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    if not config.decon_enabled:
+        return json.dumps({"error": "Decontamination pipeline is disabled"})
     budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
     if len(clues) > budget:
         clues = clues[:budget] + "..."
@@ -1422,6 +1433,8 @@ async def decon_verify(
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    if not config.decon_enabled:
+        return json.dumps({"error": "Decontamination pipeline is disabled"})
     budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
     if len(clues) > budget:
         clues = clues[:budget] + "..."
@@ -1502,6 +1515,8 @@ async def decon_provenance(
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    if not config.decon_enabled:
+        return json.dumps({"error": "Decontamination pipeline is disabled"})
     budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
     if len(clues) > budget:
         clues = clues[:budget] + "..."
@@ -1579,6 +1594,8 @@ async def decon_synthesis(
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    if not config.decon_enabled:
+        return json.dumps({"error": "Decontamination pipeline is disabled"})
     budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
     if len(clues) > budget:
         clues = clues[:budget] + "..."
@@ -1666,6 +1683,8 @@ async def decon_patterns(
     confidence: Annotated[float, "Confidence 0.0-1.0"] = 1.0,
 ) -> str:
     import json
+    if not config.decon_enabled:
+        return json.dumps({"error": "Decontamination pipeline is disabled"})
     budget = int(os.environ.get("GROK_SEARCH_DECON_THOUGHT_BUDGET", "2000"))
     if len(clues) > budget:
         clues = clues[:budget] + "..."

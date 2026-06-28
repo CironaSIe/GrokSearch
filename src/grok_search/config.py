@@ -140,6 +140,10 @@ class Config:
         return os.environ.get("SPECIALIST_ENABLED", "true").lower() not in ("false", "0", "no")
 
     @property
+    def decon_enabled(self) -> bool:
+        return os.environ.get("GROK_DECON_ENABLED", "true").lower() not in ("false", "0", "no")
+
+    @property
     def grok_fetch_fallback_enabled(self) -> bool:
         return os.getenv("GROK_FETCH_FALLBACK", "true").lower() in ("true", "1", "yes")
 
@@ -251,6 +255,7 @@ class Config:
             "SPECIALIST_HTTP_PROXY": self.specialist_http_proxy or "未配置",
             "SPECIALIST_HTTPS_PROXY": self.specialist_https_proxy or "未配置",
             "SPECIALIST_ENABLED": self.specialist_enabled,
+            "GROK_DECON_ENABLED": self.decon_enabled,
             "config_status": config_status
         }
 

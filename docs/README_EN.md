@@ -280,6 +280,7 @@ Purpose: Detect information contamination (data manipulation, agenda-driven narr
 **Auto-triggered**: Set `contamination_suspected=true` in `plan_intent`. At medium/high suspicion, suggests entering the decontamination flow.
 
 **Environment control**:
+- `GROK_DECON_ENABLED=true` — set to `false` to disable the entire decontamination pipeline (tools return error, plan_intent description stripped)
 - `DECON_THOUGHT_BUDGET=2000` — max clues characters per phase
 
 Pipeline phases (called in order):
