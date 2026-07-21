@@ -136,7 +136,7 @@ class Config:
 
     @property
     def search_timeout_seconds(self) -> int:
-        return int(os.getenv("SEARCH_TIMEOUT", "120"))
+        return int(os.getenv("SEARCH_TIMEOUT", "180"))
 
     @property
     def fetch_timeout_seconds(self) -> int:
