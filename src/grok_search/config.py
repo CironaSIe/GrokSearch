@@ -56,6 +56,17 @@ class Config:
         return os.getenv("GROK_FORCE_RESPONSES_API", "false").lower() in ("true", "1", "yes")
 
     @property
+    def allow_non_stream(self) -> bool:
+        """Whether empty-stream recovery may issue a non-stream HTTP request.
+
+        Default false: primary path is always stream; non-stream against
+        console.x.ai-style proxies often hits Cloudflare ~60s gateway 504.
+        Set GROK_ALLOW_NON_STREAM=true only if your backend needs the legacy
+        empty-stream → non-stream fallback.
+        """
+        return os.getenv("GROK_ALLOW_NON_STREAM", "false").lower() in ("true", "1", "yes")
+
+    @property
     def retry_max_attempts(self) -> int:
         return int(os.getenv("GROK_RETRY_MAX_ATTEMPTS", "3"))
 
@@ -239,6 +250,7 @@ class Config:
             "GROK_SSL_VERIFY": self.ssl_verify_enabled,
             "GROK_WEB_SEARCH_TOOL": self.web_search_tool_enabled,
             "GROK_FORCE_RESPONSES_API": self.force_responses_api,
+            "GROK_ALLOW_NON_STREAM": self.allow_non_stream,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),
             "SEARCH_TIMEOUT": self.search_timeout_seconds,

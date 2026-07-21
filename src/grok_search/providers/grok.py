@@ -444,10 +444,25 @@ class GrokSearchProvider(BaseSearchProvider):
                         if content.strip():
                             return content
 
+        if not config.allow_non_stream:
+            await log_info(
+                ctx,
+                "streaming returned empty content; non-stream fallback disabled "
+                "(set GROK_ALLOW_NON_STREAM=true to enable)",
+                config.debug_enabled,
+            )
+            return ""
         await log_info(ctx, "streaming returned empty content, fallback to non-stream request", config.debug_enabled)
         return await self._execute_non_stream_with_retry(headers, payload, ctx)
 
     async def _execute_non_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
+        if not config.allow_non_stream:
+            await log_info(
+                ctx,
+                "non-stream request blocked by GROK_ALLOW_NON_STREAM=false",
+                config.debug_enabled,
+            )
+            return ""
         body = dict(payload)
         body["stream"] = False
         read_timeout = self.timeout or config.search_timeout_seconds
@@ -471,6 +486,7 @@ class GrokSearchProvider(BaseSearchProvider):
                     if self._use_responses_api:
                         return self._extract_content_from_responses(data)
                     return self._extract_content_from_completion(data)
+        return ""
 
     @staticmethod
     def _extract_content_from_completion(data: dict) -> str:

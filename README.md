@@ -161,6 +161,7 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_API_KEY` | ❌ | `{GUDA_API_KEY}` | Grok API 密钥，覆盖 GuDa 推导值 |
 | `GROK_MODEL` | ❌ | `grok-4.20-fast` | 默认模型（设置后优先于 `~/.config/grok-search/config.json`） |
 | `GROK_FORCE_RESPONSES_API` | ❌ | `false` | 强制使用 Responses API（multi-agent 模型自动启用） |
+| `GROK_ALLOW_NON_STREAM` | ❌ | `false` | 流式解析为空时是否回退非流式请求（经 grok2api console 等易 504 的后端请保持 false） |
 | `TAVILY_API_KEY` | ❌ | `{GUDA_API_KEY}` | Tavily API 密钥（用于 web_fetch / web_map） |
 | `TAVILY_API_URL` | ❌ | `{GUDA_BASE_URL}/tavily` | Tavily API 地址 |
 | `TAVILY_ENABLED` | ❌ | `true` | 是否启用 Tavily |
