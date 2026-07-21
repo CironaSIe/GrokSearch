@@ -57,14 +57,22 @@ class Config:
 
     @property
     def allow_non_stream(self) -> bool:
-        """Whether empty-stream recovery may issue a non-stream HTTP request.
+        """Whether a non-stream HTTP fallback is permitted after stream fails empty.
 
-        Default false: primary path is always stream; non-stream against
-        console.x.ai-style proxies often hits Cloudflare ~60s gateway 504.
-        Set GROK_ALLOW_NON_STREAM=true only if your backend needs the legacy
-        empty-stream → non-stream fallback.
+        **Default request mode is always stream** (``stream: true``), regardless
+        of this flag. This switch does **not** mean "use non-stream by default".
+
+        - ``false`` (default): stream only; never issue ``stream: false``.
+        - ``true``: still stream first; only if stream parse yields empty content,
+          may retry once with ``stream: false`` (legacy recovery; risky on
+          console.x.ai / CF ~60s gateway 504 backends).
+
+        Env aliases: ``GROK_ALLOW_NON_STREAM`` or ``GROK_NON_STREAM_FALLBACK``.
         """
-        return os.getenv("GROK_ALLOW_NON_STREAM", "false").lower() in ("true", "1", "yes")
+        raw = os.getenv("GROK_NON_STREAM_FALLBACK")
+        if raw is None:
+            raw = os.getenv("GROK_ALLOW_NON_STREAM", "false")
+        return str(raw).lower() in ("true", "1", "yes")
 
     @property
     def retry_max_attempts(self) -> int:

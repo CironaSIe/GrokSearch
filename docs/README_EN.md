@@ -137,7 +137,7 @@ You can also configure additional environment variables in the `env` field:
 | `GROK_API_KEY` | No | `{GUDA_API_KEY}` | Grok API key, overrides GuDa |
 | `GROK_MODEL` | No | `grok-4.20-fast` | Default model |
 | `GROK_FORCE_RESPONSES_API` | No | `false` | Force Responses API (auto-enabled for multi-agent models) |
-| `GROK_ALLOW_NON_STREAM` | No | `false` | Allow non-stream fallback when stream parse is empty (keep false behind grok2api console / CF 504 gateways) |
+| `GROK_ALLOW_NON_STREAM` | No | `false` | **Primary path is always stream**; if true, allow one non-stream fallback when stream is empty (alias `GROK_NON_STREAM_FALLBACK`; keep false behind console/CF 504) |
 | `TAVILY_API_KEY` | No | `{GUDA_API_KEY}` | Tavily API key (for web_fetch / web_map) |
 | `TAVILY_API_URL` | No | `{GUDA_BASE_URL}/tavily` | Tavily API endpoint |
 | `TAVILY_ENABLED` | No | `true` | Enable Tavily |

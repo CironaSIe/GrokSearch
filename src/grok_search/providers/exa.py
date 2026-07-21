@@ -14,7 +14,9 @@ class ExaSearchProvider(BaseSearchProvider):
     async def search(self, query: str, max_results: int = 5,
                      include_domains: List[str] | None = None,
                      exclude_domains: List[str] | None = None,
-                     category: str | None = None) -> List[SearchResult]:
+                     category: str | None = None,
+                     **kwargs) -> List[SearchResult]:
+        _ = kwargs
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",

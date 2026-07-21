@@ -274,9 +274,9 @@ class GrokSearchProvider(BaseSearchProvider):
     async def search(
         self,
         query: str,
+        max_results: int = 10,
         platform: str = "",
         min_results: int = 3,
-        max_results: int = 10,
         ctx=None,
         from_date: str = "",
         to_date: str = "",
@@ -284,7 +284,10 @@ class GrokSearchProvider(BaseSearchProvider):
         max_search_results: int = 0,
         reasoning_effort: str = "",
         direction: str = "",
-    ) -> List[SearchResult]:
+        **kwargs,
+    ) -> str:
+        # Primary path is always stream; max_results kept for BaseSearchProvider compatibility.
+        _ = min_results, max_results, kwargs
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -417,7 +420,9 @@ class GrokSearchProvider(BaseSearchProvider):
         return "".join(texts)
 
     async def _execute_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
-        """执行带重试机制的流式 HTTP 请求"""
+        """执行带重试机制的流式 HTTP 请求（主路径始终 stream=true）。"""
+        payload = dict(payload)
+        payload["stream"] = True
         read_timeout = self.timeout or config.search_timeout_seconds
         timeout = httpx.Timeout(connect=6.0, read=read_timeout, write=10.0, pool=None)
         endpoint_url = f"{self.api_url}/{self._api_endpoint}"
@@ -447,19 +452,24 @@ class GrokSearchProvider(BaseSearchProvider):
         if not config.allow_non_stream:
             await log_info(
                 ctx,
-                "streaming returned empty content; non-stream fallback disabled "
-                "(set GROK_ALLOW_NON_STREAM=true to enable)",
+                "stream empty; keeping stream-only mode "
+                "(set GROK_ALLOW_NON_STREAM=true to allow one non-stream fallback; "
+                "primary requests stay stream=true)",
                 config.debug_enabled,
             )
             return ""
-        await log_info(ctx, "streaming returned empty content, fallback to non-stream request", config.debug_enabled)
+        await log_info(
+            ctx,
+            "stream empty; primary was stream=true, trying one non-stream fallback",
+            config.debug_enabled,
+        )
         return await self._execute_non_stream_with_retry(headers, payload, ctx)
 
     async def _execute_non_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
         if not config.allow_non_stream:
             await log_info(
                 ctx,
-                "non-stream request blocked by GROK_ALLOW_NON_STREAM=false",
+                "non-stream blocked (stream-only default; GROK_ALLOW_NON_STREAM=false)",
                 config.debug_enabled,
             )
             return ""
