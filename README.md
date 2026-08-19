@@ -181,6 +181,8 @@ claude mcp add-json grok-search --scope user '{
 | `MCP_TRANSPORT` | ❌ | `stdio` | MCP 传输协议（stdio/http/sse/streamable-http） |
 | `DECON_THOUGHT_BUDGET` | ❌ | `2000` | 去污管线每阶段 clues 最大字符数 |
 | `GROK_DECON_ENABLED` | ❌ | `true` | 是否启用去污管线（设为 false 关闭） |
+| `GITHUB_TOKEN` | ❌ | - | GitHub API 令牌（未设时自动尝试 `gh auth token`） |
+| `GH_TOKEN` | ❌ | - | 同上，gh 兼容变量名 |
 | `SPECIALIST_HTTP_PROXY` | ❌ | - | Specialist 抓取的 HTTP 代理（独立于系统代理） |
 | `SPECIALIST_HTTPS_PROXY` | ❌ | - | Specialist 抓取的 HTTPS 代理 |
 

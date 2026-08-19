@@ -241,6 +241,8 @@ class DeconSession:
         self.contamination_level: str | None = None
         self.contamination_dimensions: list[str] = []
         self.decon_complete: bool = False
+        self.enforce_sequential: bool = False
+        self.enforce_search: bool = False
 
     @property
     def completed_phases(self) -> list[str]:
@@ -273,6 +275,21 @@ class DeconSession:
         return summary
 
 
+def _seq_lock_result(session: DeconSession, current_phase: str, missing_phase: str) -> dict:
+    return {
+        "lock": True,
+        "lock_code": "SEQUENCE_LOCK",
+        "session_id": session.session_id,
+        "completed_phases": session.completed_phases,
+        "contamination_level": session.contamination_level,
+        "message": (
+            f"顺序锁定：去污管线要求按严格顺序执行。\n"
+            f"前序阶段「{missing_phase}」未完成，无法执行「{current_phase}」。\n"
+            f"请先完成 {missing_phase} 后再继续。"
+        ),
+    }
+
+
 class DecontaminationEngine:
     def __init__(self):
         self._sessions: dict[str, DeconSession] = {}
@@ -298,6 +315,21 @@ class DecontaminationEngine:
             session = DeconSession(session_id)
             self._sessions[session_id] = session
 
+        # ── Sequential lock: if enforce_sequential, reject out-of-order phases ──
+        if session.enforce_sequential:
+            if phase == "decon_assess":
+                pass  # always allowed
+            elif phase in ("decon_synthesis", "decon_patterns"):
+                for pname in DECON_PHASE_NAMES[:DECON_ORDER[phase]]:
+                    if pname not in session.phases:
+                        return _seq_lock_result(session, phase, pname)
+            else:
+                phase_idx = DECON_ORDER.get(phase, -1)
+                if phase_idx > 0:
+                    prev_phase = DECON_PHASE_NAMES[phase_idx - 1]
+                    if prev_phase not in session.phases:
+                        return _seq_lock_result(session, phase, prev_phase)
+
         if is_revision or phase not in session.phases:
             session.phases[phase] = PhaseRecord(
                 phase=phase, thought=thought, data=phase_data or {}, confidence=confidence,
@@ -316,7 +348,13 @@ class DecontaminationEngine:
         if phase == "decon_assess" and phase_data:
             session.contamination_level = phase_data.get("contamination_level")
             session.contamination_dimensions = phase_data.get("contamination_dimensions", [])
-            if session.contamination_level in (None, "low"):
+            if session.contamination_level in ("medium", "high") and not phase_data.get("_skip_note"):
+                session.enforce_sequential = True
+                session.enforce_search = True
+            elif session.contamination_level == "low" and not phase_data.get("_skip_note"):
+                session.enforce_sequential = False
+                session.enforce_search = False
+            if not session.enforce_sequential and session.contamination_level in (None, "low"):
                 for p in DECON_PHASE_NAMES:
                     if p not in session.phases and p != "decon_assess":
                         session.phases[p] = PhaseRecord(
@@ -325,17 +363,20 @@ class DecontaminationEngine:
                         )
                 session.decon_complete = True
 
-        if phase in ("decon_synthesis", "decon_patterns") and "decon_assess" not in session.phases:
-            session.phases["decon_assess"] = PhaseRecord(
-                phase="decon_assess",
-                thought="auto-created: analysis already in LLM context, prior phases skipped",
-                data={"contamination_level": "medium",
-                      "contamination_dimensions": ["contextual_knowledge"],
-                      "_skip_note": "Prior decon phases auto-skipped: LLM has analysis in context"},
-            )
-            session.contamination_level = "medium"
+        if not session.enforce_sequential:
+            if phase in ("decon_synthesis", "decon_patterns") and "decon_assess" not in session.phases:
+                session.phases["decon_assess"] = PhaseRecord(
+                    phase="decon_assess",
+                    thought="auto-created: analysis already in LLM context, prior phases skipped",
+                    data={"contamination_level": "medium",
+                          "contamination_dimensions": ["contextual_knowledge"],
+                          "_skip_note": "Prior decon phases auto-skipped: LLM has analysis in context"},
+                )
+                session.contamination_level = "medium"
 
-        if phase == "decon_synthesis":
+        if phase == "decon_patterns" or (
+            not session.enforce_sequential and phase == "decon_synthesis"
+        ):
             session.decon_complete = True
 
         last_done = max((DECON_ORDER[p] for p in session.phases if p in DECON_ORDER), default=-1)

@@ -7,6 +7,11 @@ import httpx
 class SourceType(StrEnum):
     GITHUB_ISSUE = "github_issue"
     GITHUB_PULL = "github_pull"
+    GITHUB_RAW = "github_raw"
+    GITHUB_BLOB = "github_blob"
+    GITHUB_GIST = "github_gist"
+    GITHUB_RELEASE = "github_release"
+    GITHUB_README = "github_readme"
     ARXIV = "arxiv"
     WIKIPEDIA = "wikipedia"
     HACKER_NEWS = "hacker_news"
@@ -33,7 +38,12 @@ class SourceRouter:
     def __init__(self, github_token: str | None = None,
                  http_proxy: str | None = None,
                  https_proxy: str | None = None):
-        from .github import GithubIssueExtractor, GithubPrExtractor
+        from .github import (
+            GithubIssueExtractor, GithubPrExtractor,
+            GithubRawExtractor, GithubBlobExtractor,
+            GithubGistExtractor, GithubReleaseExtractor,
+            GithubReadmeExtractor,
+        )
         from .arxiv import ArxivExtractor
         from .wikipedia import WikipediaExtractor
         from .hackernews import HackerNewsExtractor
@@ -41,6 +51,11 @@ class SourceRouter:
         self._extractors: list[SourceExtractor] = [
             GithubIssueExtractor(github_token),
             GithubPrExtractor(github_token),
+            GithubRawExtractor(github_token),
+            GithubBlobExtractor(github_token),
+            GithubGistExtractor(github_token),
+            GithubReleaseExtractor(github_token),
+            GithubReadmeExtractor(github_token),
             ArxivExtractor(),
             WikipediaExtractor(),
             HackerNewsExtractor(),

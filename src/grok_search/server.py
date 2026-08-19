@@ -82,6 +82,46 @@ _AVAILABLE_MODELS_CACHE: dict[tuple[str, str], list[str]] = {}
 _AVAILABLE_MODELS_LOCK = asyncio.Lock()
 
 
+def _search_lock_result(session_id: str, phase: str, detail: str) -> str:
+    import json
+    return json.dumps({
+        "lock": True,
+        "lock_code": "SEARCH_LOCK",
+        "session_id": session_id,
+        "phase": phase,
+        "message": (
+            f"搜索锁定：去污管线阶段「{phase}」需要实际搜索数据。\n\n"
+            f"{detail}\n\n"
+            f"请先调用 web_search 执行实际搜索，将返回的 session_id 作为参数传入后重试。"
+            f"\n注意：只有真实的 web_search 调用会产生有效数据，伪造的 session_id 无法通过验证。"
+        ),
+    }, ensure_ascii=False)
+
+
+async def _verify_search_evidence(search_evidence: str) -> tuple[bool, str]:
+    if not search_evidence:
+        return False, "未提供 search_evidence"
+
+    ids = [s.strip() for s in search_evidence.split(",") if s.strip()]
+    if not ids:
+        return False, "search_evidence 为空"
+
+    valid_count = 0
+    for sid in ids:
+        sources = await _SOURCES_CACHE.get(sid)
+        if sources and len(sources) > 0:
+            valid_count += 1
+
+    if valid_count == 0:
+        return False, (
+            "提供的 session_id 在搜索缓存中无实际数据。\n"
+            "请先调用 web_search(query='<相关关键词>', direction='comprehensive') "
+            "完成实际搜索，使用返回的 session_id。"
+        )
+
+    return True, ""
+
+
 async def _fetch_available_models(api_url: str, api_key: str) -> list[str]:
     import httpx
 
@@ -537,15 +577,19 @@ async def _try_fetch_python(url: str, timeout: int) -> str | None:
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
-            if "text/html" not in resp.headers.get("content-type", ""):
+            ct = resp.headers.get("content-type", "").lower()
+            if "text/html" in ct:
+                md = extract(
+                    resp.text,
+                    output_format="markdown",
+                    include_comments=False,
+                    fast=True,
+                )
+                return md if md and md.strip() else None
+            elif ct.startswith("text/") or "application/json" in ct:
+                return resp.text
+            else:
                 return None
-            md = extract(
-                resp.text,
-                output_format="markdown",
-                include_comments=False,
-                fast=True,
-            )
-            return md if md and md.strip() else None
     except Exception:
         return None
 
@@ -573,7 +617,7 @@ _BACKEND_DISPATCH = {
 def _build_fetch_description() -> str:
     available = []
     if _source_router is not None:
-        available.append("specialist (Wikipedia/arXiv/GitHub/HN)")
+        available.append("specialist (Wikipedia/arXiv/GitHub/Gist/Releases/Raw)")
     try:
         import trafilatura  # noqa: F401
         available.append("python (trafilatura)")
@@ -985,9 +1029,11 @@ async def toggle_builtin_tools(
 
 
 _DECON_PIPELINE_DESC = (
-    "    **Contamination side-pipeline** (skippable, see contamination_flag in response):\n"
+    "    **Contamination side-pipeline** (order-enforced when level is medium/high):\n"
     "    decon_assess → decon_verify → decon_provenance →\n"
-    "    decon_motive → decon_synthesis → decon_patterns"
+    "    decon_motive → decon_synthesis → decon_patterns\n"
+    "    When contamination_suspected=true in plan_intent, this pipeline MUST be completed\n"
+    "    before plan_complexity. Medium/high contamination locks strict phase order."
     if __import__("grok_search.config", fromlist=["config"]).config.decon_enabled
     else "    (Decontamination pipeline is disabled. Enable it in server configuration to use this feature.)"
 )
@@ -1014,7 +1060,8 @@ _DECON_PIPELINE_DESC = (
     - premise_valid: set to false if the question rests on a flawed assumption.
     - contamination_suspected: set true if the topic involves high power asymmetry,
       concentrated voice, known data contamination history, or strong incentive
-      asymmetry. When true, a decontamination flag will appear in the response.
+      asymmetry. When true, plan_complexity will be blocked until the decontamination
+      pipeline is completed. A contamination_flag will appear in the response.
     - confidence, is_revision: internal bookkeeping — not needed for initial creation.
 
     Full pipeline: plan_intent → plan_complexity → plan_sub_query(×N) →
@@ -1061,8 +1108,8 @@ async def plan_intent(
                 "decon_verify", "decon_provenance",
                 "decon_motive", "decon_synthesis",
             ],
-            "can_skip": True,
-            "note": "Call decon_assess to begin, or skip and continue with plan_complexity",
+            "can_skip": False,
+            "note": "高污染标记：必须先调用 decon_assess 完成去污管线评估，才能继续规划阶段。",
         }
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -1097,8 +1144,23 @@ async def plan_complexity(
     is_revision: Annotated[bool, "True to overwrite"] = False,
 ) -> str:
     import json
-    if not planning_engine.get_session(session_id):
+    sess = planning_engine.get_session(session_id)
+    if not sess:
         return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
+    intent = sess.phases.get("intent_analysis")
+    if intent and intent.data and intent.data.get("contamination_suspected"):
+        decon_sess = decon_engine.get_session(session_id)
+        if not decon_sess or not decon_sess.decon_complete:
+            return json.dumps({
+                "lock": True,
+                "lock_code": "DECON_REQUIRED",
+                "session_id": session_id,
+                "message": (
+                    "高污染标记：plan_intent 检测到潜在信息污染，必须先完成去污管线评估。\n\n"
+                    "请先调用 decon_assess(session_id={}, ...) 完成初始评估。\n"
+                    "去污管线完成后才能进入复杂度和规划阶段。"
+                ).format(session_id),
+            }, ensure_ascii=False, indent=2)
     return json.dumps(planning_engine.process_phase(
         phase="complexity_assessment", thought=thought, session_id=session_id,
         is_revision=is_revision, confidence=confidence,
@@ -1309,6 +1371,13 @@ async def plan_execution(
     Previous: plan_intent (when contamination_flag.detected is true)
     Next: low → skip (continue plan); medium/high → decon_verify
 
+    **Lock behavior:**
+    - contamination_level=low: pipeline auto-completes, no lock.
+    - contamination_level=medium/high: enables enforce_sequence (strict phase order)
+      and enforce_search (search evidence required). All subsequent phases will
+      reject out-of-order calls with LOCK(SEQUENCE_LOCK) and require valid
+      web_search data with LOCK(SEARCH_LOCK).
+
     **Assessment (internal reasoning, no search needed):**
     Look for observable clues that suggest information may be managed:
     - How much power or money is at stake for key actors?
@@ -1422,6 +1491,11 @@ async def decon_motive(
 
     If you need baseline data, call web_search first with domain-specific terms,
     then pass results via check_results. This tool does NOT auto-search.
+
+    **Lock behavior (when enforce_search is active):**
+    - If statistical_claims is provided but check_results is empty,
+      the tool will reject with LOCK(SEARCH_LOCK) — you must call
+      web_search first and provide real results.
     """,
 )
 async def decon_verify(
@@ -1443,6 +1517,14 @@ async def decon_verify(
     sess = decon_engine.get_session(session_id)
     if not sess or "decon_assess" not in sess.phases:
         return json.dumps({"error": "Call decon_assess first."})
+    if sess and sess.enforce_search and statistical_claims and not check_results:
+        return _search_lock_result(
+            session_id, "decon_verify",
+            "参数 statistical_claims 不为空，但 check_results 为空。\n"
+            "本阶段(enforce_search=true)要求先完成实际搜索。\n"
+            "请先调用 web_search 搜索相关关键词，将返回的 session_id 作为 search_evidence 传入，"
+            "并将搜索结果整理为 JSON 填入 check_results。",
+        )
     data = {}
     if key_concepts:
         data["key_concepts"] = [c.strip() for c in key_concepts.split(",") if c.strip()]
@@ -1488,6 +1570,11 @@ async def decon_verify(
     **CRITICAL: Without search_evidence, provenance_chains may be fabricated from
     training data. Always search first.**
 
+    **Lock behavior (when enforce_search is active):**
+    - search_evidence must contain real web_search session_ids with actual data.
+    - Invalid/fabricated session_ids will be rejected with LOCK(SEARCH_LOCK).
+    - The server verifies each session_id against its source cache.
+
     Traces:
     1. Earliest known origin of key claims — search for which source first made the claim.
     2. Propagation path and changes at each hop — search for how it was repeated/modified.
@@ -1525,6 +1612,18 @@ async def decon_provenance(
     sess = decon_engine.get_session(session_id)
     if not sess or "decon_assess" not in sess.phases:
         return json.dumps({"error": "Call decon_assess first."})
+    if sess and sess.enforce_search and provenance_chains and not search_evidence:
+        return _search_lock_result(
+            session_id, "decon_provenance",
+            "参数 provenance_chains 不为空，但 search_evidence 为空。\n"
+            "本阶段(enforce_search=true)要求先完成实际搜索。\n"
+            "请先调用 web_search 逐个搜索 claims_to_trace 中的声明，"
+            "将返回的 session_id 作为 search_evidence 传入。",
+        )
+    if sess and sess.enforce_search and search_evidence:
+        valid, msg = await _verify_search_evidence(search_evidence)
+        if not valid:
+            return _search_lock_result(session_id, "decon_provenance", msg)
     data = {
         "claims_to_trace": [c.strip() for c in claims_to_trace.split(",") if c.strip()],
         "max_searches": max_searches,
@@ -1564,6 +1663,10 @@ async def decon_provenance(
     (from conversation or prior reasoning), you can call this directly with
     `contamination_summary` and `corrected_directions` — prior phases will be
     auto-skipped. A warning will be issued if no search_evidence is provided.
+
+    **Lock behavior (when enforce_search is active):**
+    - corrected_directions or contamination_summary requires valid search_evidence.
+    - Missing or invalid search_evidence will be rejected with LOCK(SEARCH_LOCK).
 
     Produces:
     1. What different search directions returned — summarize, don't adjudicate.
@@ -1607,8 +1710,23 @@ async def decon_synthesis(
             session_id=session_id,
             phase_data={"contamination_level": "medium",
                         "contamination_dimensions": ["contextual_knowledge"],
-                        "domain": "unknown"},
+                        "domain": "unknown",
+                        "_skip_note": "auto-created: skip option"},
         )
+    sess = decon_engine.get_session(session_id)
+    if sess and sess.enforce_search:
+        if corrected_directions or contamination_summary:
+            if not search_evidence:
+                return _search_lock_result(
+                    session_id, "decon_synthesis",
+                    "参数 corrected_directions/contamination_summary 不为空，但 search_evidence 为空。\n"
+                    "本阶段(enforce_search=true)要求先完成跨信源搜索。\n"
+                    "请先调用 web_search(direction='comprehensive') 完成搜索，"
+                    "将返回的 session_id 作为 search_evidence 传入。",
+                )
+            valid, msg = await _verify_search_evidence(search_evidence)
+            if not valid:
+                return _search_lock_result(session_id, "decon_synthesis", msg)
     data = {}
     if search_evidence:
         data["search_evidence"] = [s.strip() for s in search_evidence.split(",") if s.strip()]
@@ -1696,7 +1814,8 @@ async def decon_patterns(
             session_id=session_id,
             phase_data={"contamination_level": "medium",
                         "contamination_dimensions": ["contextual_knowledge"],
-                        "domain": "unknown"},
+                        "domain": "unknown",
+                        "_skip_note": "auto-created: skip option"},
         )
     result = decon_engine.process_phase(
         phase="decon_patterns", thought=clues, session_id=session_id,

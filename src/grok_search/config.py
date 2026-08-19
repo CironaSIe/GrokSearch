@@ -1,5 +1,8 @@
 import os
 import json
+import shutil
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 class Config:
@@ -144,7 +147,10 @@ class Config:
 
     @property
     def github_token(self) -> str | None:
-        return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if token:
+            return token
+        return _gh_auth_token()
 
     @property
     def specialist_http_proxy(self) -> str | None:
@@ -278,5 +284,19 @@ class Config:
             "GROK_DECON_ENABLED": self.decon_enabled,
             "config_status": config_status
         }
+
+@lru_cache(maxsize=1)
+def _gh_auth_token() -> str | None:
+    if not shutil.which("gh"):
+        return None
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True, text=True, timeout=5
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+
 
 config = Config()
