@@ -13,12 +13,18 @@ class SourceType(StrEnum):
     GITHUB_RELEASE = "github_release"
     GITHUB_README = "github_readme"
     HUGGINGFACE = "huggingface"
+    PYPI = "pypi"
+    NPM = "npm"
+    STACK_OVERFLOW = "stack_overflow"
+    CRATES = "crates"
+    NUGET = "nuget"
     ARXIV = "arxiv"
     WIKIPEDIA = "wikipedia"
     HACKER_NEWS = "hacker_news"
+    MEDIAWIKI = "mediawiki"
 
 
-GLOBAL_UA = "GrokSearch/1.0 (https://github.com/GuDaStudio/GrokSearch)"
+BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
 class SourceExtractor(ABC):
@@ -50,6 +56,12 @@ class SourceRouter:
         from .wikipedia import WikipediaExtractor
         from .hackernews import HackerNewsExtractor
         from .huggingface import HuggingFaceExtractor
+        from .pypi import PypiExtractor
+        from .npm import NpmExtractor
+        from .stack_overflow import StackOverflowExtractor
+        from .crates import CratesExtractor
+        from .nuget import NugetExtractor
+        from .mediawiki import MediaWikiExtractor
 
         self._extractors: list[SourceExtractor] = [
             GithubIssueExtractor(github_token),
@@ -60,8 +72,14 @@ class SourceRouter:
             GithubReleaseExtractor(github_token),
             GithubReadmeExtractor(github_token),
             HuggingFaceExtractor(hf_token),
+            PypiExtractor(),
+            NpmExtractor(),
+            StackOverflowExtractor(),
+            CratesExtractor(),
+            NugetExtractor(),
             ArxivExtractor(),
             WikipediaExtractor(),
+            MediaWikiExtractor(),
             HackerNewsExtractor(),
         ]
         self._http_proxy = http_proxy

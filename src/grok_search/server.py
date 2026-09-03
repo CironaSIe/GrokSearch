@@ -574,7 +574,7 @@ async def _try_fetch_python(url: str, timeout: int) -> str | None:
         async with httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; GrokSearch/1.0; +https://github.com/GuDaStudio/GrokSearch)"},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
@@ -618,7 +618,7 @@ _BACKEND_DISPATCH = {
 def _build_fetch_description() -> str:
     available = []
     if _source_router is not None:
-        available.append("specialist (Wikipedia/arXiv/GitHub/Gist/HF/Releases/Raw)")
+        available.append("specialist (Wikipedia/arXiv/GitHub/Gist/HF/Releases/Raw/PyPI/npm/SO/Crates)")
     try:
         import trafilatura  # noqa: F401
         available.append("python (trafilatura)")

@@ -1,6 +1,6 @@
 import re
 import httpx
-from . import SourceExtractor, SourceType
+from . import SourceExtractor, SourceType, BROWSER_UA
 
 
 _PATTERN = re.compile(r"^https?://arxiv\.org/(?:abs|pdf)/(\d+\.\d+)(?:v\d+)?$")
@@ -19,7 +19,7 @@ class ArxivExtractor(SourceExtractor):
             return None
         paper_id = m.group(1)
         api_url = f"http://export.arxiv.org/api/query?id_list={paper_id}"
-        headers = {"User-Agent": "GrokSearch/1.0"}
+        headers = {"User-Agent": BROWSER_UA}
         try:
             resp = await client.get(api_url, headers=headers)
             if resp.status_code != 200:

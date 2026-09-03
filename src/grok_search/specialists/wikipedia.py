@@ -1,7 +1,7 @@
 import re
 import httpx
 from urllib.parse import quote
-from . import SourceExtractor, SourceType, GLOBAL_UA
+from . import SourceExtractor, SourceType, BROWSER_UA
 
 
 _PATTERN = re.compile(r"^https?://([a-z-]+)\.wikipedia\.org/wiki/(.+)$")
@@ -20,7 +20,7 @@ class WikipediaExtractor(SourceExtractor):
             return None
         lang, title = m.groups()
         api_url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{quote(title, safe='')}"
-        headers = {"User-Agent": GLOBAL_UA}
+        headers = {"User-Agent": BROWSER_UA}
         try:
             resp = await client.get(api_url, headers=headers)
             if resp.status_code != 200:
