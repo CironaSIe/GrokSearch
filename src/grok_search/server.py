@@ -38,6 +38,7 @@ try:
     from grok_search.specialists import SourceRouter
     _source_router = SourceRouter(
         github_token=config.github_token,
+        hf_token=config.hf_token,
         http_proxy=config.specialist_http_proxy,
         https_proxy=config.specialist_https_proxy,
     )
@@ -617,7 +618,7 @@ _BACKEND_DISPATCH = {
 def _build_fetch_description() -> str:
     available = []
     if _source_router is not None:
-        available.append("specialist (Wikipedia/arXiv/GitHub/Gist/Releases/Raw)")
+        available.append("specialist (Wikipedia/arXiv/GitHub/Gist/HF/Releases/Raw)")
     try:
         import trafilatura  # noqa: F401
         available.append("python (trafilatura)")

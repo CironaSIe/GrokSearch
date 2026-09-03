@@ -12,6 +12,7 @@ class SourceType(StrEnum):
     GITHUB_GIST = "github_gist"
     GITHUB_RELEASE = "github_release"
     GITHUB_README = "github_readme"
+    HUGGINGFACE = "huggingface"
     ARXIV = "arxiv"
     WIKIPEDIA = "wikipedia"
     HACKER_NEWS = "hacker_news"
@@ -36,6 +37,7 @@ class SourceExtractor(ABC):
 
 class SourceRouter:
     def __init__(self, github_token: str | None = None,
+                 hf_token: str | None = None,
                  http_proxy: str | None = None,
                  https_proxy: str | None = None):
         from .github import (
@@ -47,6 +49,7 @@ class SourceRouter:
         from .arxiv import ArxivExtractor
         from .wikipedia import WikipediaExtractor
         from .hackernews import HackerNewsExtractor
+        from .huggingface import HuggingFaceExtractor
 
         self._extractors: list[SourceExtractor] = [
             GithubIssueExtractor(github_token),
@@ -56,6 +59,7 @@ class SourceRouter:
             GithubGistExtractor(github_token),
             GithubReleaseExtractor(github_token),
             GithubReadmeExtractor(github_token),
+            HuggingFaceExtractor(hf_token),
             ArxivExtractor(),
             WikipediaExtractor(),
             HackerNewsExtractor(),
@@ -89,17 +93,15 @@ class SourceRouter:
         if extractor is None:
             return None
         try:
-            proxies = {}
+            proxy = None
             if self._http_proxy:
-                proxies["http://"] = self._http_proxy
+                proxy = self._http_proxy
             if self._https_proxy:
-                proxies["https://"] = self._https_proxy
-            if not proxies:
-                proxies = None
+                proxy = self._https_proxy
 
             async with httpx.AsyncClient(
                 timeout=timeout,
-                proxies=proxies,
+                proxy=proxy,
                 follow_redirects=True,
             ) as client:
                 content = await extractor.fetch_render(client, cleaned)

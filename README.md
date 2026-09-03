@@ -183,6 +183,7 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_DECON_ENABLED` | ❌ | `true` | 是否启用去污管线（设为 false 关闭） |
 | `GITHUB_TOKEN` | ❌ | - | GitHub API 令牌（未设时自动尝试 `gh auth token`） |
 | `GH_TOKEN` | ❌ | - | 同上，gh 兼容变量名 |
+| `HF_TOKEN` | ❌ | - | Hugging Face API 令牌（私有/受限仓库，未设时兜底读取 `~/.cache/huggingface/token`） |
 | `SPECIALIST_HTTP_PROXY` | ❌ | - | Specialist 抓取的 HTTP 代理（独立于系统代理） |
 | `SPECIALIST_HTTPS_PROXY` | ❌ | - | Specialist 抓取的 HTTPS 代理 |
 

@@ -153,6 +153,19 @@ class Config:
         return _gh_auth_token()
 
     @property
+    def hf_token(self) -> str | None:
+        token = os.environ.get("HF_TOKEN")
+        if token:
+            return token
+        try:
+            path = Path.home() / ".cache" / "huggingface" / "token"
+            if path.exists():
+                return path.read_text(encoding="utf-8").strip() or None
+        except (OSError, ValueError):
+            pass
+        return None
+
+    @property
     def specialist_http_proxy(self) -> str | None:
         return os.environ.get("SPECIALIST_HTTP_PROXY")
 
@@ -278,6 +291,7 @@ class Config:
             "EXA_API_KEY": self._mask_api_key(self.exa_api_key) if self.exa_api_key else "未配置",
             "EXA_BASE_URL": self.exa_base_url,
             "GITHUB_TOKEN": self._mask_api_key(self.github_token) if self.github_token else "未配置",
+            "HF_TOKEN": self._mask_api_key(self.hf_token) if self.hf_token else "未配置",
             "SPECIALIST_HTTP_PROXY": self.specialist_http_proxy or "未配置",
             "SPECIALIST_HTTPS_PROXY": self.specialist_https_proxy or "未配置",
             "SPECIALIST_ENABLED": self.specialist_enabled,
